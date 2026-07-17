@@ -1206,114 +1206,157 @@ struct FinalReport {
     HashResult     hash_res;
     double         overall_score;
 
-    void print(const SysInfo& sys) const {
+void print(const SysInfo& sys) const {
+        const int kW      = 62;
+        const int kLabelW = 26;
+        const int kValW   = 12;
+        const int kUnitW  = 8;
+
+        auto hr = [&](char c = '-') {
+            std::cout << "  " << std::string(static_cast<size_t>(kW - 2), c) << "\n";
+        };
+
+        auto row = [&](const std::string& label, const std::string& value,
+                       const std::string& unit) {
+            std::cout << "  " << std::left  << std::setw(kLabelW) << label
+                      << std::right << std::setw(kValW)  << value
+                      << "  " << std::left  << std::setw(kUnitW) << unit << "\n";
+        };
+
+        auto row_score = [&](const std::string& label, const std::string& value,
+                             const std::string& unit, double score) {
+            std::ostringstream ss;
+            ss << std::fixed << std::setprecision(1) << score;
+            std::cout << "  " << std::left  << std::setw(kLabelW) << label
+                      << std::right << std::setw(kValW)  << value
+                      << "  " << std::left  << std::setw(kUnitW) << unit
+                      << "  >> score  " << std::right << std::setw(6) << ss.str() << "\n";
+        };
+
+        auto section = [&](int n, const std::string& title) {
+            std::cout << "\n";
+            hr('=');
+            std::ostringstream ss;
+            ss << n << ". " << title;
+            std::cout << "  " << std::left << std::setw(kW - 2) << ss.str() << "\n";
+            hr('-');
+        };
+
+        // ---- Header ----
         std::cout << "\n";
-        std::cout << "╔══════════════════════════════════════════════════════════════╗\n";
-        std::cout << "║           ezbench — CPU Benchmark Results                    ║\n";
-        std::cout << "╠══════════════════════════════════════════════════════════════╣\n";
-        std::cout << "║  Architecture : " << std::left << std::setw(44) << sys.arch << "║\n";
-        std::cout << "║  Compiler     : " << std::left << std::setw(44) << sys.compiler << "║\n";
-        std::cout << "║  HW Threads   : " << std::left << std::setw(44) << sys.hw_threads << "║\n";
-        std::cout << "╠══════════════════════════════════════════════════════════════╣\n";
+        hr('=');
+        std::cout << "  " << std::left << std::setw(kW - 2)
+                  << "ezbench -- CPU Benchmark Results" << "\n";
+        hr('=');
+        row("Architecture",   sys.arch,                    "");
+        row("Compiler",       sys.compiler,                "");
+        row("HW Threads",     std::to_string(sys.hw_threads), "");
+        row("Rounds",         std::to_string(kBenchRounds), "(averaged)");
+        hr('=');
 
-        // ---- Integer ----
-        std::cout << "║                                                              ║\n";
-        std::cout << "║  [1] Integer Arithmetic                                      ║\n";
-        std::cout << "║      Add : " << std::right << std::setw(10) << fmt(int_res.add_mops)     << " MOPS"
-                  << "  |  Mul : " << std::setw(10) << fmt(int_res.mul_mops)     << " MOPS  ║\n";
-        std::cout << "║      Div : " << std::right << std::setw(10) << fmt(int_res.div_mops)     << " MOPS"
-                  << "  |  Bit : " << std::setw(10) << fmt(int_res.bit_mops)     << " MOPS  ║\n";
+        // ---- 1. Integer ----
+        section(1, "Integer Arithmetic");
+        row("  Add",             fmt(int_res.add_mops),     "MOPS");
+        row("  Mul",             fmt(int_res.mul_mops),     "MOPS");
+        row("  Div",             fmt(int_res.div_mops),     "MOPS");
+        row("  Bit",             fmt(int_res.bit_mops),     "MOPS");
+        row("  ---",             "",                        "");
         double int_score = norm_higher(int_res.composite_mops, Reference::int_composite);
-        std::cout << "║      Composite : " << std::setw(10) << fmt(int_res.composite_mops)
-                  << " MOPS  →  score " << std::setw(6) << fmt(int_score, 1) << "          ║\n";
+        row_score("  Composite",  fmt(int_res.composite_mops), "MOPS", int_score);
 
-        // ---- FP ----
-        std::cout << "║                                                              ║\n";
-        std::cout << "║  [2] Floating-Point (scalar)                                 ║\n";
-        std::cout << "║      SP  Add / Mul / Div / Sqrt : "
-                  << fmt(fp_res.sp_add, 0) << " / " << fmt(fp_res.sp_mul, 0) << " / "
-                  << fmt(fp_res.sp_div, 0) << " / " << fmt(fp_res.sp_sqrt, 0) << " MFLOPS ║\n";
-        std::cout << "║      DP  Add / Mul / Div / Sqrt : "
-                  << fmt(fp_res.dp_add, 0) << " / " << fmt(fp_res.dp_mul, 0) << " / "
-                  << fmt(fp_res.dp_div, 0) << " / " << fmt(fp_res.dp_sqrt, 0) << " MFLOPS ║\n";
+        // ---- 2. FP ----
+        section(2, "Floating-Point (scalar)");
+        row("  SP  Add",    fmt(fp_res.sp_add, 0),  "MFLOPS");
+        row("  SP  Mul",    fmt(fp_res.sp_mul, 0),  "MFLOPS");
+        row("  SP  Div",    fmt(fp_res.sp_div, 0),  "MFLOPS");
+        row("  SP  Sqrt",   fmt(fp_res.sp_sqrt, 0), "MFLOPS");
+        row("  DP  Add",    fmt(fp_res.dp_add, 0),  "MFLOPS");
+        row("  DP  Mul",    fmt(fp_res.dp_mul, 0),  "MFLOPS");
+        row("  DP  Div",    fmt(fp_res.dp_div, 0),  "MFLOPS");
+        row("  DP  Sqrt",   fmt(fp_res.dp_sqrt, 0), "MFLOPS");
+        row("  ---",         "",                     "");
         double fp_score = norm_higher(fp_res.overall_mflops, Reference::fp_composite);
-        std::cout << "║      Composite : " << std::setw(10) << fmt(fp_res.overall_mflops, 0)
-                  << " MFLOPS →  score " << std::setw(6) << fmt(fp_score, 1) << "          ║\n";
+        row_score("  Composite", fmt(fp_res.overall_mflops, 0), "MFLOPS", fp_score);
 
-        // ---- Memory BW ----
-        std::cout << "║                                                              ║\n";
-        std::cout << "║  [3] Memory Bandwidth (sequential, " << kMemBufMB << " MB)                      ║\n";
-        std::cout << "║      Read  : " << std::setw(10) << fmt(bw_res.read_gbs)  << " GB/s"
-                  << "  |  Write : " << std::setw(10) << fmt(bw_res.write_gbs) << " GB/s  ║\n";
-        std::cout << "║      Copy  : " << std::setw(10) << fmt(bw_res.copy_gbs)  << " GB/s"
-                  << "                              ║\n";
-        double bw_read_score = norm_higher(bw_res.read_gbs, Reference::mem_read);
+        // ---- 3. Memory BW ----
+        {
+            std::ostringstream t;
+            t << "Memory Bandwidth (sequential, " << kMemBufMB << " MB)";
+            section(3, t.str());
+        }
+        row("  Read",  fmt(bw_res.read_gbs),  "GB/s");
+        row("  Write", fmt(bw_res.write_gbs), "GB/s");
+        row("  Copy",  fmt(bw_res.copy_gbs),  "GB/s");
+        row("  ---",   "", "");
+        double bw_read_score  = norm_higher(bw_res.read_gbs,  Reference::mem_read);
         double bw_write_score = norm_higher(bw_res.write_gbs, Reference::mem_write);
         double bw_score = std::sqrt(bw_read_score * bw_write_score);
-        std::cout << "║      Score : " << std::setw(10) << fmt(bw_score, 1) << "                          ║\n";
+        row_score("  Score (R+W geom)", "", "", bw_score);
 
-        // ---- Memory Latency ----
-        std::cout << "║                                                              ║\n";
-        std::cout << "║  [4] Memory Latency (pointer chase)                          ║\n";
-        std::cout << "║      Random access latency : " << std::setw(7)
-                  << fmt(lat_res.lat_ns) << " ns                         ║\n";
+        // ---- 4. Memory Latency ----
+        section(4, "Memory Latency (pointer chase)");
+        row("  Large-buffer avg", fmt(lat_res.lat_ns), "ns");
+        if (!lat_res.curve.empty()) {
+            std::cout << "\n  Working-set sweep (pointer-chase latency):\n";
+            const int64_t csz[] = {4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536,131072};
+            for (size_t i = 0; i < lat_res.curve.size() && i < 16; ++i) {
+                std::string lbl;
+                if (csz[i] >= 1024) lbl = fmt(static_cast<double>(csz[i])/1024.0, 0) + " MB";
+                else                lbl = std::to_string(csz[i]) + " KB";
+                row("    " + lbl, fmt(lat_res.curve[i]), "ns");
+            }
+        }
+        row("  ---",   "", "");
         double lat_score = norm_lower(lat_res.lat_ns, Reference::mem_latency);
-        std::cout << "║      Score : " << std::setw(10) << fmt(lat_score, 1) << "                          ║\n";
+        row_score("  Score", "", "", lat_score);
 
-        // ---- Branch ----
-        std::cout << "║                                                              ║\n";
-        std::cout << "║  [5] Branch Prediction                                       ║\n";
-        std::cout << "║      Predictable   : " << std::setw(10) << fmt(br_res.predictable_mops)
-                  << " Melem/s                ║\n";
-        std::cout << "║      Unpredictable : " << std::setw(10) << fmt(br_res.unpredictable_mops)
-                  << " Melem/s                ║\n";
-        std::cout << "║      Ratio         : " << std::setw(10) << fmt(br_res.ratio)
-                  << " x                         ║\n";
+        // ---- 5. Branch ----
+        section(5, "Branch Prediction");
+        row("  Predictable",   fmt(br_res.predictable_mops),   "Melem/s");
+        row("  Unpredictable", fmt(br_res.unpredictable_mops), "Melem/s");
+        row("  Ratio",         fmt(br_res.ratio),              "x");
+        row("  ---",           "",                             "");
         double br_score = norm_higher(br_res.ratio, Reference::branch_ratio);
-        std::cout << "║      Score : " << std::setw(10) << fmt(br_score, 1) << "                          ║\n";
+        row_score("  Score", "", "", br_score);
 
-        // ---- Cache ----
-        std::cout << "║                                                              ║\n";
-        std::cout << "║  [6] Cache Hierarchy (bandwidth vs. working-set size)       ║\n";
-        for (size_t i = 0; i < cache_res.sizes_kb.size() && i < 9; ++i) {
-            std::string label;
-            double kb = cache_res.sizes_kb[i];
-            if (kb >= 1024.0)
-                label = fmt(kb / 1024.0, 0) + " MB";
-            else
-                label = fmt(kb, 0) + " KB";
-            std::cout << "║      " << std::setw(10) << label << " : " << std::setw(10)
-                      << fmt(cache_res.bw_gbs[i]) << " GB/s                       ║\n";
+        // ---- 6. Cache ----
+        section(6, "Cache Hierarchy (bandwidth vs. size)");
+        if (!cache_res.sizes_kb.empty()) {
+            for (size_t i = 0; i < cache_res.sizes_kb.size(); ++i) {
+                std::string lbl;
+                double kb = cache_res.sizes_kb[i];
+                if (kb >= 1024.0) lbl = fmt(kb / 1024.0, 0) + " MB";
+                else              lbl = fmt(kb, 0) + " KB";
+                row("  " + lbl, fmt(cache_res.bw_gbs[i]), "GB/s");
+            }
         }
-        // Use small-buffer bandwidth as the cache score baseline.
-        double cache_score = norm_higher(cache_res.bw_gbs.empty() ? 0.0 : cache_res.bw_gbs[0],
-                                         100.0); // 100 GB/s reference for L1
-        std::cout << "║      Score (L1 peak) : " << std::setw(10) << fmt(cache_score, 1)
-                  << "                       ║\n";
+        row("  ---", "", "");
+        double cache_score = norm_higher(
+            cache_res.bw_gbs.empty() ? 0.0 : cache_res.bw_gbs[0], 100.0);
+        row_score("  Score (L1 peak)", "", "", cache_score);
 
-        // ---- ILP ----
-        std::cout << "║                                                              ║\n";
-        std::cout << "║  [7] Instruction-Level Parallelism                           ║\n";
-        std::cout << "║      Dependent   : " << std::setw(10)
-                  << fmt(ilp_res.dep_ops_per_ns) << " ops/ns             ║\n";
-        std::cout << "║      Independent : " << std::setw(10)
-                  << fmt(ilp_res.ind_ops_per_ns) << " ops/ns             ║\n";
-        std::cout << "║      ILP Factor  : " << std::setw(10)
-                  << fmt(ilp_res.ilp_factor) << " x                    ║\n";
+        // ---- 7. ILP ----
+        section(7, "Instruction-Level Parallelism");
+        row("  Dependent chain",  fmt(ilp_res.dep_ops_per_ns), "ops/ns");
+        row("  Independent ops",  fmt(ilp_res.ind_ops_per_ns), "ops/ns");
+        row("  ILP factor",       fmt(ilp_res.ilp_factor),     "x");
+        row("  ---",              "",                          "");
         double ilp_score = norm_higher(ilp_res.ilp_factor, Reference::ilp_factor);
-        std::cout << "║      Score : " << std::setw(10) << fmt(ilp_score, 1) << "                          ║\n";
+        row_score("  Score", "", "", ilp_score);
 
-        // ---- Multi-thread ----
-        std::cout << "║                                                              ║\n";
-        std::cout << "║  [8] Multi-Threaded Scaling                                  ║\n";
+        // ---- 8. MT ----
+        section(8, "Multi-Threaded Scaling");
         for (size_t i = 0; i < mt_res.thread_counts.size(); ++i) {
-            std::cout << "║      " << std::setw(3) << mt_res.thread_counts[i] << " threads : "
-                      << std::setw(7) << fmt(mt_res.speedups[i]) << " x speedup"
-                      << "  (" << pct(mt_res.speedups[i] / mt_res.thread_counts[i])
-                      << " efficiency)       ║\n";
+            int    tc = mt_res.thread_counts[i];
+            double sp = mt_res.speedups[i];
+            double ef = sp / static_cast<double>(tc);
+            std::ostringstream l, v;
+            l << "  " << tc << " thread" << (tc > 1 ? "s" : "");
+            v << fmt(sp) << "x  (" << pct(ef) << " eff.)";
+            row(l.str(), v.str(), "");
         }
+        row("  ---", "", "");
         double mt_score = 0.0;
-        // Find speedup at 4 threads (or closest).
         for (size_t i = 0; i < mt_res.thread_counts.size(); ++i) {
             if (mt_res.thread_counts[i] >= 4) {
                 mt_score = norm_higher(mt_res.speedups[i], Reference::mt_speedup_4t);
@@ -1321,52 +1364,56 @@ struct FinalReport {
             }
         }
         if (mt_score == 0.0 && !mt_res.speedups.empty())
-            mt_score = norm_higher(mt_res.speedups.back(), 2.0); // fallback
-        std::cout << "║      Score : " << std::setw(10) << fmt(mt_score, 1) << "                          ║\n";
+            mt_score = norm_higher(mt_res.speedups.back(), 2.0);
+        row_score("  Score (@ 4 thr)", "", "", mt_score);
 
-        // ---- MatMul ----
-        std::cout << "║                                                              ║\n";
-        std::cout << "║  [9] Matrix Multiplication (" << mm_res.matrix_size << "x" << mm_res.matrix_size
-                  << " float)                ║\n";
-        std::cout << "║      Throughput : " << std::setw(10) << fmt(mm_res.gflops)
-                  << " GFLOPS                      ║\n";
+        // ---- 9. MatMul ----
+        {
+            std::ostringstream t;
+            t << "Matrix Multiplication (" << mm_res.matrix_size << "x" << mm_res.matrix_size << " float)";
+            section(9, t.str());
+        }
+        row("  Throughput", fmt(mm_res.gflops), "GFLOPS");
+        row("  ---",        "",                 "");
         double mm_score = norm_higher(mm_res.gflops, Reference::matmul_gflops);
-        std::cout << "║      Score : " << std::setw(10) << fmt(mm_score, 1) << "                          ║\n";
+        row_score("  Score", "", "", mm_score);
 
-        // ---- Sort ----
-        std::cout << "║                                                              ║\n";
-        std::cout << "║ [10] Sorting Throughput (std::sort)                          ║\n";
-        std::cout << "║      " << comma(kSortSize) << " elements : "
-                  << std::setw(10) << fmt(sort_res.melem_per_sec) << " Melem/s          ║\n";
+        // ---- 10. Sort ----
+        section(10, "Sorting Throughput (std::sort)");
+        row("  " + comma(kSortSize) + " elements",
+            fmt(sort_res.melem_per_sec), "Melem/s");
+        row("  ---", "", "");
         double sort_score = norm_higher(sort_res.melem_per_sec, Reference::sort_melem);
-        std::cout << "║      Score : " << std::setw(10) << fmt(sort_score, 1) << "                          ║\n";
+        row_score("  Score", "", "", sort_score);
 
-        // ---- Hash ----
-        std::cout << "║                                                              ║\n";
-        std::cout << "║ [11] Hash / Mix Throughput (" << kHashMB << " MB)                          ║\n";
-        std::cout << "║      Throughput : " << std::setw(10) << fmt(hash_res.mbs)
-                  << " MB/s                        ║\n";
+        // ---- 11. Hash ----
+        {
+            std::ostringstream t;
+            t << "Hash / Mix Throughput (" << kHashMB << " MB)";
+            section(11, t.str());
+        }
+        row("  Throughput", fmt(hash_res.mbs), "MB/s");
+        row("  ---",        "",               "");
         double hash_score = norm_higher(hash_res.mbs, Reference::hash_mbs);
-        std::cout << "║      Score : " << std::setw(10) << fmt(hash_score, 1) << "                          ║\n";
+        row_score("  Score", "", "", hash_score);
 
         // ---- Overall ----
-        std::cout << "╠══════════════════════════════════════════════════════════════╣\n";
-        std::cout << "║                                                              ║\n";
-        std::cout << "║  ★  OVERALL SCORE  :  " << std::setw(10) << fmt(overall_score, 1)
-                  << "                          ║\n";
-        std::cout << "║                                                              ║\n";
-        std::cout << "║  (Geometric mean of all sub-scores.  100 ≈ baseline.         ║\n";
-        std::cout << "║   Higher is better.)                                        ║\n";
-        std::cout << "╚══════════════════════════════════════════════════════════════╝\n";
+        std::cout << "\n";
+        hr('=');
+        std::cout << "  " << std::left << std::setw(kLabelW) << "*  OVERALL SCORE"
+                  << std::right << std::setw(kValW) << fmt(overall_score, 1) << "\n";
+        hr('=');
+        std::cout << "  (Geometric mean of 12 sub-scores.  100 = baseline CPU 2020.)\n";
 
-        // Machine-readable summary line.
-        std::cout << "\n[CSV] int,fp,mem_r,mem_w,mem_lat,branch,ilp,multithread,matmul,sort,hash,overall\n";
-        std::cout << "[CSV] " << fmt(int_score, 1) << "," << fmt(fp_score, 1) << ","
-                  << fmt(bw_read_score, 1) << "," << fmt(bw_write_score, 1) << ","
-                  << fmt(lat_score, 1) << "," << fmt(br_score, 1) << ","
-                  << fmt(ilp_score, 1) << "," << fmt(mt_score, 1) << ","
-                  << fmt(mm_score, 1) << "," << fmt(sort_score, 1) << ","
-                  << fmt(hash_score, 1) << "," << fmt(overall_score, 1) << "\n";
+        // Machine-readable CSV.
+        std::cout << "\n[CSV] int,fp,mem_r,mem_w,mem_lat,branch,cache,ilp,mt,matmul,sort,hash,overall\n";
+        std::cout << "[CSV] " << fmt(int_score, 1)   << "," << fmt(fp_score, 1)       << ","
+                                    << fmt(bw_read_score, 1) << "," << fmt(bw_write_score, 1) << ","
+                                    << fmt(lat_score, 1)     << "," << fmt(br_score, 1)       << ","
+                                    << fmt(cache_score, 1)   << "," << fmt(ilp_score, 1)      << ","
+                                    << fmt(mt_score, 1)      << "," << fmt(mm_score, 1)       << ","
+                                    << fmt(sort_score, 1)    << "," << fmt(hash_score, 1)     << ","
+                                    << fmt(overall_score, 1) << "\n";
     }
 };
 
@@ -1410,19 +1457,19 @@ static double compute_overall(const FinalReport& r) {
 
 int main() {
     std::cout << "\n";
-    std::cout << "╔══════════════════════════════════════════════════════════════╗\n";
-    std::cout << "║  ezbench — Cross-Platform CPU Benchmark                      ║\n";
-    std::cout << "║  Copyright (c) 2026 Hemingtsai  |  MIT License               ║\n";
-    std::cout << "╚══════════════════════════════════════════════════════════════╝\n\n";
+    std::cout << "  ============================================================\n";
+    std::cout << "    ezbench -- Cross-Platform CPU Benchmark\n";
+    std::cout << "    Copyright (c) 2026 Hemingtsai  |  MIT License\n";
+    std::cout << "  ============================================================\n\n";
 
     SysInfo sys = SysInfo::detect();
-    std::cout << "Detected: " << sys.arch << " | " << sys.compiler
+    std::cout << "  Detected: " << sys.arch << " | " << sys.compiler
               << " | " << sys.hw_threads << " HW thread(s)\n\n";
 
     FinalReport report;
 
     // Run all benchmarks.
-    std::cout << "--- Benchmarking (" << kBenchRounds << " rounds each, results averaged) ---\n";
+    std::cout << "  --- Benchmarking (" << kBenchRounds << " rounds each, averaged) ---\n";
     report.int_res   = bench_integer();
     report.fp_res    = bench_fp();
     report.bw_res    = bench_mem_bandwidth();
