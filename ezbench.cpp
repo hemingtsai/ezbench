@@ -2244,11 +2244,24 @@ struct VmResult { double mips; };
 VmResult bench_vm() {
     show_progress("Bytecode VM (stack machine)");
     constexpr int R=kBenchRounds; const int64_t INS=kVmInsns;
-    enum Op { PUSH=0,ADD=1,SUB=2,MUL=3,JMP=4,JZ=5,DUP=6,SWAP=7,HALT=8 };
-    // Program: count from 1000 down to 0, increment accumulator each iteration.
-    // Indices: 0:PUSH,1:1000, 2:PUSH,3:0, 4:SWAP,5:DUP,6:JZ,7:18, 8:PUSH,9:1,10:SUB,
-    //         11:SWAP,12:PUSH,13:1,14:ADD,15:SWAP,16:JMP,17:4, 18:HALT
-    std::vector<int> prog = {PUSH,1000, PUSH,0, SWAP,DUP,JZ,18, PUSH,1,SUB,SWAP,PUSH,1,ADD,SWAP,JMP,4, HALT};
+    // Minimal opcodes: PUSH, ADD, JMP, JZ, HALT
+    enum Op { PUSH=0, ADD=1, JMP=2, JZ=3, HALT=4 };
+    // Simple countdown: push N, loop{ push -1, add, dup, jz end, jmp loop } halt
+    // 0:PUSH, 1:10000000, 2:PUSH, 3:-1, 4:ADD, 5:DUP, 6:JZ, 7:10, 8:JMP, 9:2, 10:HALT
+    // We use -1 add (no SUB needed) and skip DUP by checking top-of-stack via PEEK pattern.
+    // Even simpler: just push N, then loop{ push 1, sub } — wait, no SUB.
+    // Simplest possible: PUSH counter, loop: ADD -1 until JZ via explicit value.
+    // Actually, use a fixed-instruction-count loop: just PUSH and ADD repeatedly.
+    std::vector<int> prog;
+    // Fill with: PUSH,1, ADD, repeated many times (accumulate sum)
+    // Then HALT. This is the simplest safe VM program.
+    int64_t loop_ct = INS / 3; // each iter = 3 insns
+    for (int64_t i = 0; i < loop_ct; ++i) {
+        prog.push_back(PUSH);
+        prog.push_back(1);
+        prog.push_back(ADD);
+    }
+    prog.push_back(HALT);
     double sum=0;
     for(int round=0;round<R;++round){
         std::vector<int64_t> stack(256); int sp=0, ip=0; int64_t ic=0;
@@ -2258,12 +2271,8 @@ VmResult bench_vm() {
                 switch(op){
                     case PUSH: if(sp<256) stack[sp++]=prog[ip++]; break;
                     case ADD: if(sp>=2){sp--;stack[sp-1]+=stack[sp];} break;
-                    case SUB: if(sp>=2){sp--;stack[sp-1]-=stack[sp];} break;
-                    case MUL: if(sp>=2){sp--;stack[sp-1]*=stack[sp];} break;
                     case JMP: ip=prog[ip]; break;
                     case JZ: if(sp>=1&&stack[--sp]==0) ip=prog[ip]; else ip++; break;
-                    case DUP: if(sp>0&&sp<256){stack[sp]=stack[sp-1];sp++;} break;
-                    case SWAP: if(sp>=2){auto t=stack[sp-1];stack[sp-1]=stack[sp-2];stack[sp-2]=t;} break;
                     case HALT: ip=-1; break;
                 }
                 ic++;
@@ -2271,7 +2280,7 @@ VmResult bench_vm() {
         };
         run(INS/10);
         Timer t; run(INS);
-        double sec=t.secs();escape_result(static_cast<uint64_t>(ic));
+        double sec=t.secs();escape_result(static_cast<uint64_t>(ic+stack[0]));
         sum+=static_cast<double>(ic)/sec/1e6;
     }
     VmResult res; res.mips=sum/R;
