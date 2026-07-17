@@ -2524,16 +2524,22 @@ struct Reference {
     static constexpr double raster_mtris     =        0.03;   // Mtris/s
 };
 
-// Normalise a "higher-is-better" metric.
+// Non-linear cubic-root scoring.  Ratio = measured/ref (or ref/measured for
+// lower-is-better).  Score = 100 × ∛(ratio).  When measured == ref, score = 100
+// (anchored to the reference machine).  The cube root compresses extremes:
+// 8× faster → 200, 1/8× slower → 50.  Much fairer than linear scaling.
 inline double norm_higher(double measured, double ref) {
-    if (ref <= 0.0) return 0.0;
-    return (measured / ref) * 100.0;
+    if (ref <= 0.0 || measured <= 0.0) return 0.0;
+    double ratio = measured / ref;
+    if (!std::isfinite(ratio)) return 200.0;
+    return 100.0 * std::cbrt(ratio);
 }
 
-// Normalise a "lower-is-better" metric (invert).
 inline double norm_lower(double measured, double ref) {
-    if (measured <= 0.0) return 200.0;
-    return (ref / measured) * 100.0;
+    if (measured <= 0.0 || ref <= 0.0) return 200.0;
+    double ratio = ref / measured;  // invert: lower = better
+    if (!std::isfinite(ratio)) return 200.0;
+    return 100.0 * std::cbrt(ratio);
 }
 
 struct FinalReport {
@@ -3037,7 +3043,6 @@ static double compute_overall(const FinalReport& r) {
     double log_sum = 0.0;
     for (double s : scores) {
         if (s <= 0.0) s = 0.01;
-        if (!std::isfinite(s) || s > 1000.0) s = 1000.0;
         log_sum += std::log(s);
     }
     return std::exp(log_sum / static_cast<double>(scores.size()));
