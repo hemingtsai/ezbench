@@ -2194,15 +2194,30 @@ struct AstResult { double mnodes_per_sec; };
 AstResult bench_ast() {
     show_progress("AST Evaluation (expression tree)");
     constexpr int R=kBenchRounds; const int ND=kAstNodes;
-    struct Node { int op; double val; Node *l,*r; }; // op:0=const,1=add,2=mul,3=sin
+    struct Node { int op; double val; Node *l,*r; };
     std::vector<Node> pool(ND);
     { uint64_t s=runtime_seed(); std::mt19937_64 rng(s); for(int i=0;i<ND;++i){pool[i].op=rng()%4;pool[i].val=(rng()%1000)/100.0;pool[i].l=(i*2+1<ND)?&pool[i*2+1]:nullptr;pool[i].r=(i*2+2<ND)?&pool[i*2+2]:nullptr;} }
-    std::function<double(Node*)> eval=[&](Node*n)->double{if(!n)return 0;switch(n->op){case 0:return n->val;case 1:return eval(n->l)+eval(n->r);case 2:return eval(n->l)*eval(n->r);case 3:return std::sin(eval(n->l));default:return 0;}};
+    // Volatile sink inside eval forces the compiler to materialize every result.
+    volatile double vsink = 0;
+    std::function<double(Node*)> eval=[&](Node*n)->double{
+        if(!n)return 0;
+        double r;
+        switch(n->op){
+            case 0:r=n->val;break;
+            case 1:r=eval(n->l)+eval(n->r);break;
+            case 2:r=eval(n->l)*eval(n->r);break;
+            case 3:r=std::sin(eval(n->l));break;
+            default:r=0;
+        }
+        vsink += r * 1e-20;  // force materialization via volatile store
+        return r;
+    };
     double sum=0;
     for(int round=0;round<R;++round){
+        if(round>0){for(int i=0;i<ND;++i)pool[i].val+=1e-15;}
         eval(&pool[0]); // warm up
-        Timer t; volatile double r=eval(&pool[0]);
-        double sec=t.secs();escape_result(static_cast<uint64_t>(r*1e9));
+        Timer t; double r=eval(&pool[0]);
+        double sec=t.secs();escape_result(static_cast<uint64_t>(r*1e9+vsink));
         sum+=static_cast<double>(ND)/sec/1e6;
     }
     AstResult res; res.mnodes_per_sec=sum/R;
