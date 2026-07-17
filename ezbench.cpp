@@ -113,9 +113,9 @@ static constexpr int      kSwSeqLen       =         500;  // Smith-Waterman seq 
 static constexpr int      kIzhNeurons     =         200;  // Izhikevich neurons
 static constexpr int      kIzhSteps       =         500;  // Izhikevich time steps
 static constexpr int64_t  kLuN            =         400;  // LU matrix size
-static constexpr int      kOdeSteps       =      200000;  // ODE solver steps
-static constexpr int      kAstNodes       =     2000000;  // AST nodes
-static constexpr int      kKaratsubaBits  =       32768;  // BigInt bits
+static constexpr int      kOdeSteps       =     1000000;  // ODE solver steps
+static constexpr int      kAstNodes       =     5000000;  // AST nodes
+static constexpr int      kKaratsubaBits  =       65536;  // BigInt bits
 static constexpr int64_t  kRegexMB        =          32;  // regex input MB
 static constexpr int64_t  kJsonMB         =          32;  // JSON input MB (approx)
 static constexpr int64_t  kAllocOps       =     2000000;  // alloc/free ops
@@ -2495,29 +2495,29 @@ struct Reference {
     static constexpr double chem_gflops      =     3.0;   // GFLOPS
     static constexpr double game_melem       =    30.0;   // Melem/s
     static constexpr double ai_gflops        =    25.0;   // GFLOPS
-    static constexpr double fdtd_mlups       =    50.0;   // MLUPS
-    static constexpr double rigid_mcolps     =    10.0;   // Mcollisions/s
-    static constexpr double ray_mrays        =    20.0;   // Mrays/s
-    static constexpr double hf_gflops        =     5.0;   // GFLOPS
-    static constexpr double mc_msteps        =     3.0;   // Msteps/s
-    static constexpr double hp_mevals        =     5.0;   // Mevals/s
-    static constexpr double sw_mcells        =    50.0;   // Mcells/s
-    static constexpr double neuron_mupd      =    30.0;   // Mneuron-upd/s
-    static constexpr double lu_gflops        =    15.0;   // GFLOPS
-    static constexpr double ode_steps        = 10000.0;   // steps/s
-    static constexpr double karatsuba_mdm    =    10.0;   // Mdigit-mul/s
-    static constexpr double regex_mbs        =   100.0;   // MB/s
-    static constexpr double json_mbs         =   200.0;   // MB/s
-    static constexpr double alloc_mallocs    =    50.0;   // Mallocs/s
-    static constexpr double atomic_matomic   =   200.0;   // Matomic-inc/s
-    static constexpr double ast_mnodes       =    80.0;   // Mnodes/s
-    static constexpr double parse_mtokens    =    50.0;   // Mtokens/s
-    static constexpr double vm_mips          =   200.0;   // MIPS
-    static constexpr double aes_mbs          =   300.0;   // MB/s
-    static constexpr double sha_mbs          =   200.0;   // MB/s
-    static constexpr double lzss_mbs         =    50.0;   // MB/s
-    static constexpr double conv_mpix        =   500.0;   // Mpixels/s
-    static constexpr double raster_mtris     =    10.0;   // Mtris/s
+    static constexpr double fdtd_mlups       =   500.0;   // MLUPS
+    static constexpr double rigid_mcolps     =    20.0;   // Mcollisions/s
+    static constexpr double ray_mrays        =   100.0;   // Mrays/s
+    static constexpr double hf_gflops        =    20.0;   // GFLOPS
+    static constexpr double mc_msteps        =     5.0;   // Msteps/s
+    static constexpr double hp_mevals        =    10.0;   // Mevals/s
+    static constexpr double sw_mcells        =  2000.0;   // Mcells/s
+    static constexpr double neuron_mupd      =   200.0;   // Mneuron-upd/s
+    static constexpr double lu_gflops        =    30.0;   // GFLOPS
+    static constexpr double ode_steps        = 5000000.0; // steps/s
+    static constexpr double karatsuba_mdm    =   200.0;   // Mdigit-mul/s
+    static constexpr double regex_mbs        =   500.0;   // MB/s
+    static constexpr double json_mbs         =   500.0;   // MB/s
+    static constexpr double alloc_mallocs    =   100.0;   // Mallocs/s
+    static constexpr double atomic_matomic   =   500.0;   // Matomic-inc/s
+    static constexpr double ast_mnodes       =   500.0;   // Mnodes/s
+    static constexpr double parse_mtokens    =   200.0;   // Mtokens/s
+    static constexpr double vm_mips          =  1000.0;   // MIPS
+    static constexpr double aes_mbs          =  1000.0;   // MB/s
+    static constexpr double sha_mbs          =   500.0;   // MB/s
+    static constexpr double lzss_mbs         =   100.0;   // MB/s
+    static constexpr double conv_mpix        =  2000.0;   // Mpixels/s
+    static constexpr double raster_mtris     =    20.0;   // Mtris/s
 };
 
 // Normalise a "higher-is-better" metric.
@@ -3033,7 +3033,7 @@ static double compute_overall(const FinalReport& r) {
     double log_sum = 0.0;
     for (double s : scores) {
         if (s <= 0.0) s = 0.01;
-        if (!std::isfinite(s) || s > 10000.0) s = 10000.0;
+        if (!std::isfinite(s) || s > 1000.0) s = 1000.0;
         log_sum += std::log(s);
     }
     return std::exp(log_sum / static_cast<double>(scores.size()));
