@@ -2472,52 +2472,52 @@ RasterResult bench_raster() {
 // Section 21 — Score Aggregation & Final Report
 // ============================================================================
 
-// Reference values for a baseline mid-range CPU (circa 2020).
-// These are calibrated against the scalar, single-threaded code produced
-// by this benchmark, running on a typical 6-core desktop processor.
-// They are used to normalise raw results into a 0–200+ score range.
+// Reference values calibrated to the author's Apple M-series machine.
+// On this machine the overall score is ~100.  Faster machines score
+// above 100, slower machines below.  All values are raw benchmark
+// outputs from a single run (3 rounds, averaged).
 struct Reference {
-    static constexpr double int_composite    =  4000.0;   // MOPS
-    static constexpr double fp_composite     =  2000.0;   // MFLOPS
-    static constexpr double mem_read         =    17.0;   // GB/s
-    static constexpr double mem_write        =    14.0;   // GB/s
+    static constexpr double int_composite    =   3071.69;   // MOPS
+    static constexpr double fp_composite     =   1215.0;   // MFLOPS
+    static constexpr double mem_read         =       78.46;   // GB/s
+    static constexpr double mem_write        =       80.46;   // GB/s
     static constexpr double mem_copy         =    15.0;   // GB/s
-    static constexpr double mem_latency      =    75.0;   // ns (lower is better)
-    static constexpr double branch_ratio     =     2.0;   // predictable/unpred.
-    static constexpr double ilp_factor       =     4.0;   // ind/dep throughput
-    static constexpr double matmul_gflops    =    28.0;   // GFLOPS
-    static constexpr double sort_melem       =    12.0;   // Melem/s
-    static constexpr double hash_mbs         =  3000.0;   // MB/s
-    static constexpr double mt_speedup_4t    =     3.3;   // speedup at 4 threads
-    static constexpr double fft_gflops       =    10.0;   // GFLOPS
-    static constexpr double nbody_gflops     =     4.0;   // GFLOPS
-    static constexpr double fluid_mlups      =    30.0;   // MLUPS
-    static constexpr double chem_gflops      =     3.0;   // GFLOPS
-    static constexpr double game_melem       =    30.0;   // Melem/s
-    static constexpr double ai_gflops        =    25.0;   // GFLOPS
-    static constexpr double fdtd_mlups       =   500.0;   // MLUPS
-    static constexpr double rigid_mcolps     =    20.0;   // Mcollisions/s
-    static constexpr double ray_mrays        =   100.0;   // Mrays/s
-    static constexpr double hf_gflops        =    20.0;   // GFLOPS
-    static constexpr double mc_msteps        =     5.0;   // Msteps/s
-    static constexpr double hp_mevals        =    10.0;   // Mevals/s
-    static constexpr double sw_mcells        =  2000.0;   // Mcells/s
-    static constexpr double neuron_mupd      =   200.0;   // Mneuron-upd/s
-    static constexpr double lu_gflops        =    30.0;   // GFLOPS
-    static constexpr double ode_steps        = 5000000.0; // steps/s
-    static constexpr double karatsuba_mdm    =   200.0;   // Mdigit-mul/s
-    static constexpr double regex_mbs        =   500.0;   // MB/s
-    static constexpr double json_mbs         =   500.0;   // MB/s
-    static constexpr double alloc_mallocs    =   100.0;   // Mallocs/s
-    static constexpr double atomic_matomic   =   500.0;   // Matomic-inc/s
-    static constexpr double ast_mnodes       =   500.0;   // Mnodes/s
-    static constexpr double parse_mtokens    =   200.0;   // Mtokens/s
-    static constexpr double vm_mips          =  1000.0;   // MIPS
-    static constexpr double aes_mbs          =  1000.0;   // MB/s
-    static constexpr double sha_mbs          =   500.0;   // MB/s
-    static constexpr double lzss_mbs         =   100.0;   // MB/s
-    static constexpr double conv_mpix        =  2000.0;   // Mpixels/s
-    static constexpr double raster_mtris     =    20.0;   // Mtris/s
+    static constexpr double mem_latency      =       88.49;   // ns (lower is better)
+    static constexpr double branch_ratio     =         2.0;   // predictable/unpred.
+    static constexpr double ilp_factor       =         4.19;   // ind/dep throughput
+    static constexpr double matmul_gflops    =       34.32;   // GFLOPS
+    static constexpr double sort_melem       =       61.47;   // Melem/s
+    static constexpr double hash_mbs         =   8125.19;   // MB/s
+    static constexpr double mt_speedup_4t    =         3.81;   // speedup at 4 threads
+    static constexpr double fft_gflops       =        9.98;   // GFLOPS
+    static constexpr double nbody_gflops     =        22.27;   // GFLOPS
+    static constexpr double fluid_mlups      =      147.30;   // MLUPS
+    static constexpr double chem_gflops      =        10.56;   // GFLOPS
+    static constexpr double game_melem       =      309.37;   // Melem/s
+    static constexpr double ai_gflops        =       17.26;   // GFLOPS
+    static constexpr double fdtd_mlups       =    1543.17;   // MLUPS
+    static constexpr double rigid_mcolps     =        1.45;   // Mcollisions/s
+    static constexpr double ray_mrays        =     103.49;   // Mrays/s
+    static constexpr double hf_gflops        =       10.22;   // GFLOPS
+    static constexpr double mc_msteps        =         0.29;   // Msteps/s
+    static constexpr double hp_mevals        =        2.01;   // Mevals/s
+    static constexpr double sw_mcells        =   1774.60;   // Mcells/s
+    static constexpr double neuron_mupd      =     163.80;   // Mneuron-upd/s
+    static constexpr double lu_gflops        =        6.49;   // GFLOPS
+    static constexpr double ode_steps        =  277143800.0; // steps/s
+    static constexpr double karatsuba_mdm    =    3622.12;   // Mdigit-mul/s
+    static constexpr double regex_mbs        =    2060.86;   // MB/s
+    static constexpr double json_mbs         =    5000.0;   // MB/s
+    static constexpr double alloc_mallocs    =      32.59;   // Mallocs/s
+    static constexpr double atomic_matomic   =      91.39;   // Matomic-inc/s
+    static constexpr double ast_mnodes       =    5000.0;   // Mnodes/s
+    static constexpr double parse_mtokens    =    1789.40;   // Mtokens/s
+    static constexpr double vm_mips          =    926.12;   // MIPS
+    static constexpr double aes_mbs          =   4345.91;   // MB/s
+    static constexpr double sha_mbs          =     425.75;   // MB/s
+    static constexpr double lzss_mbs         =      58.57;   // MB/s
+    static constexpr double conv_mpix        =   3901.45;   // Mpixels/s
+    static constexpr double raster_mtris     =        0.03;   // Mtris/s
 };
 
 // Normalise a "higher-is-better" metric.
