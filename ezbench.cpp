@@ -348,8 +348,8 @@ IntResult bench_integer() {
         {
             Timer t;
             for (int64_t i = 0; i < kIntIters; ++i) {
-                x = (x + z) / y;   y = (y + x) / z;   z = (z + y) / x;
-                x = (x + z) / y;   y = (y + x) / z;
+                x = (x + z) / (y | 1);   y = (y + x) / (z | 1);   z = (z + y) / (x | 1);
+                x = (x + z) / (y | 1);   y = (y + x) / (z | 1);
             }
             double ns = t.secs() * 1e9;
             sum_div += (kIntIters * 5.0) / ns * 1000.0;
