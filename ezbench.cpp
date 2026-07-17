@@ -6,23 +6,31 @@
  * ============================================================================
  *  FILE INDEX
  * ============================================================================
- *  Section  1 — Headers & Compile-time Configuration  .......  line    41
- *  Section  2 — Utility Classes & Helpers  ...................  line    70
- *  Section  3 — System / Compiler Information  ...............  line   170
- *  Section  4 — Integer Arithmetic Benchmark  ................  line   220
- *  Section  5 — Floating-Point Benchmark  ....................  line   330
- *  Section  6 — Memory Bandwidth Benchmark  ..................  line   460
- *  Section  7 — Memory Latency (Pointer Chasing)  ............  line   610
- *  Section  8 — Branch Prediction Benchmark  .................  line   740
- *  Section  9 — Cache-Hierarchy Probing Benchmark  ...........  line   840
- *  Section 10 — Instruction-Level Parallelism (ILP)  .........  line   960
- *  Section 11 — Multi-Threaded Scaling Benchmark  ............  line  1060
- *  Section 12 — Dense Matrix Multiplication Benchmark  .......  line  1180
- *  Section 13 — Sorting Throughput Benchmark  ................  line  1280
- *  Section 14 — Hash / Integer-Mix Throughput  ...............  line  1380
- *  Section 15 — Score Aggregation & Final Report  ............  line  1440
- *  Section 16 — Entry Point (main)  ..........................  line  1550
+ *  Section  1 — Headers & Compile-time Configuration  .......  line    49
+ *  Section  2 — Utility Classes & Helpers  ...................  line    78
+ *  Section  3 — System / Compiler Information  ...............  line   179
+ *  Section  4 — Integer Arithmetic Benchmark  ................  line   234
+ *  Section  5 — Floating-Point Benchmark  ....................  line   351
+ *  Section  6 — Memory Bandwidth Benchmark  ..................  line   498
+ *  Section  7 — Memory Latency (Pointer Chasing)  ............  line   651
+ *  Section  8 — Branch Prediction Benchmark  .................  line   790
+ *  Section  9 — Cache-Hierarchy Probing Benchmark  ...........  line   897
+ *  Section 10 — Instruction-Level Parallelism (ILP)  .........  line  1015
+ *  Section 11 — Multi-Threaded Scaling Benchmark  ............  line  1112
+ *  Section 12 — Dense Matrix Multiplication Benchmark  .......  line  1238
+ *  Section 13 — Sorting Throughput Benchmark  ................  line  1340
+ *  Section 14 — Hash / Integer-Mix Throughput  ...............  line  1410
+ *  Section 15 — Score Aggregation & Final Report  ............  line  1470
+ *  Section 16 — Entry Point (main)  ..........................  line  1580
  * ============================================================================
+ *
+ * Every benchmark runs kBenchRounds (default 3) independent rounds and
+ * reports the arithmetic mean.  This suppresses run-to-run noise caused by
+ * OS scheduling, thermal throttling, and frequency transients.
+ *
+ * Supported architectures: x86-64, x86-32, AArch64, ARM 32-bit (armhf &
+ * soft-float), RISC-V 64/32, LoongArch 64/32, PowerPC 64/32,
+ * IBM z/Architecture (s390x), IBM S/390, MIPS 64/32.
  *
  * Build (any C++17 compiler):
  *   g++ -std=c++17 -O2 -pthread -o ezbench ezbench.cpp
@@ -71,6 +79,7 @@ static constexpr int64_t  kMatMulN        =         512;  // matrix dimension
 static constexpr int64_t  kSortSize       =   2'000'000;  // sort array length
 static constexpr int64_t  kHashMB         =         128;  // MB for hash test
 static constexpr int      kWarmUpRounds   =           2;   // warm-up iterations
+static constexpr int      kBenchRounds    =           3;   // measurement rounds (averaged)
 
 // ============================================================================
 // Section 2 — Utility Classes & Helpers
@@ -174,15 +183,33 @@ struct SysInfo {
 #elif defined(__aarch64__) || defined(_M_ARM64)
         info.arch = "AArch64 (ARM 64-bit)";
 #elif defined(__arm__) || defined(_M_ARM)
-        info.arch = "ARM 32-bit";
-#elif defined(__powerpc64__) || defined(__ppc64__)
+#  if defined(__ARM_PCS_VFP)
+        info.arch = "ARM 32-bit (hard-float / armhf)";
+#  else
+        info.arch = "ARM 32-bit (soft-float)";
+#  endif
+#elif defined(__loongarch64)
+        info.arch = "LoongArch 64-bit";
+#elif defined(__loongarch__)
+        info.arch = "LoongArch 32-bit";
+#elif defined(__powerpc64__) || defined(__ppc64__) || defined(__PPC64__)
         info.arch = "PowerPC 64-bit";
+#elif defined(__powerpc__) || defined(__ppc__)
+        info.arch = "PowerPC 32-bit";
+#elif defined(__s390x__)
+        info.arch = "IBM z/Architecture (s390x, 64-bit)";
+#elif defined(__s390__)
+        info.arch = "IBM S/390 (31-bit)";
 #elif defined(__riscv)
 #  if __riscv_xlen == 64
         info.arch = "RISC-V 64-bit";
 #  else
         info.arch = "RISC-V 32-bit";
 #  endif
+#elif defined(__mips64)
+        info.arch = "MIPS 64-bit";
+#elif defined(__mips__)
+        info.arch = "MIPS 32-bit";
 #else
         info.arch = "Unknown";
 #endif
@@ -223,70 +250,75 @@ struct IntResult {
 
 IntResult bench_integer() {
     show_progress("Integer Arithmetic");
+    constexpr int R = kBenchRounds;
     IntResult res{};
 
-    // Use runtime seed so the compiler cannot constant-fold the loop.
-    uint64_t s = runtime_seed();
-    int64_t a = static_cast<int64_t>(s & 0xFFFF);
-    int64_t b = static_cast<int64_t>((s >> 16) & 0xFFFF);
-    int64_t c = static_cast<int64_t>((s >> 32) & 0xFFFF);
-    int64_t x = a, y = b, z = c;
+    double sum_add = 0, sum_mul = 0, sum_div = 0, sum_bit = 0;
 
-    // --- Addition ---
-    {
-        Timer t;
-        for (int64_t i = 0; i < kIntIters; ++i) {
-            x += y;   y += z;   z += x;   x += y;
-            y += z;   z += x;   x += y;   y += z;
+    for (int round = 0; round < R; ++round) {
+        // Use runtime seed + round offset so each round differs.
+        uint64_t s = runtime_seed() + static_cast<uint64_t>(round) * 0x9E3779B97F4A7C15ULL;
+        int64_t a = static_cast<int64_t>(s & 0xFFFF);
+        int64_t b = static_cast<int64_t>((s >> 16) & 0xFFFF);
+        int64_t c = static_cast<int64_t>((s >> 32) & 0xFFFF);
+        int64_t x = a, y = b, z = c;
+
+        // --- Addition ---
+        {
+            Timer t;
+            for (int64_t i = 0; i < kIntIters; ++i) {
+                x += y;   y += z;   z += x;   x += y;
+                y += z;   z += x;   x += y;   y += z;
+            }
+            double ns = t.secs() * 1e9;
+            sum_add += (kIntIters * 8.0) / ns * 1000.0;
+            escape_result(static_cast<uint64_t>(x + y + z));
         }
-        double ns = t.secs() * 1e9;
-        // 8 adds per iteration.
-        res.add_mops = (kIntIters * 8.0) / ns * 1000.0;
-        escape_result(static_cast<uint64_t>(x + y + z));
+
+        // --- Multiplication ---
+        x = a | 1;  y = b | 1;  z = c | 1;
+        {
+            Timer t;
+            for (int64_t i = 0; i < kIntIters; ++i) {
+                x *= y;   y *= z;   z *= x;   x *= y;
+                y *= z;   z *= x;   x *= y;   y *= z;
+            }
+            double ns = t.secs() * 1e9;
+            sum_mul += (kIntIters * 8.0) / ns * 1000.0;
+            escape_result(static_cast<uint64_t>(x ^ y ^ z));
+        }
+
+        // --- Division (64-bit signed) ---
+        x = a | 1;  y = b | 1;  z = c | 1;
+        {
+            Timer t;
+            for (int64_t i = 0; i < kIntIters; ++i) {
+                x = (x + z) / y;   y = (y + x) / z;   z = (z + y) / x;
+                x = (x + z) / y;   y = (y + x) / z;
+            }
+            double ns = t.secs() * 1e9;
+            sum_div += (kIntIters * 5.0) / ns * 1000.0;
+            escape_result(static_cast<uint64_t>(x + y + z));
+        }
+
+        // --- Bitwise / shift mix ---
+        x = a;  y = b;  z = c;
+        {
+            Timer t;
+            for (int64_t i = 0; i < kIntIters; ++i) {
+                x ^= y;   y <<= (z & 7);   z >>= 3;   x |= y;
+                y &= z;   z ^= x;   x <<= (y & 7);   y >>= 1;
+            }
+            double ns = t.secs() * 1e9;
+            sum_bit += (kIntIters * 8.0) / ns * 1000.0;
+            escape_result(static_cast<uint64_t>(x + y + z));
+        }
     }
 
-    // --- Multiplication ---
-    x = a | 1;  y = b | 1;  z = c | 1;  // avoid zero for variety
-    {
-        Timer t;
-        for (int64_t i = 0; i < kIntIters; ++i) {
-            x *= y;   y *= z;   z *= x;   x *= y;
-            y *= z;   z *= x;   x *= y;   y *= z;
-        }
-        double ns = t.secs() * 1e9;
-        res.mul_mops = (kIntIters * 8.0) / ns * 1000.0;
-        escape_result(static_cast<uint64_t>(x ^ y ^ z));
-    }
-
-    // --- Division (64-bit signed) ---
-    x = a | 1;  y = b | 1;  z = c | 1;
-    {
-        Timer t;
-        for (int64_t i = 0; i < kIntIters; ++i) {
-            x = (x + z) / y;   y = (y + x) / z;   z = (z + y) / x;
-            x = (x + z) / y;   y = (y + x) / z;
-        }
-        double ns = t.secs() * 1e9;
-        // 5 divs per iteration.
-        res.div_mops = (kIntIters * 5.0) / ns * 1000.0;
-        escape_result(static_cast<uint64_t>(x + y + z));
-    }
-
-    // --- Bitwise / shift mix ---
-    x = a;  y = b;  z = c;
-    {
-        Timer t;
-        for (int64_t i = 0; i < kIntIters; ++i) {
-            x ^= y;   y <<= (z & 7);   z >>= 3;   x |= y;
-            y &= z;   z ^= x;   x <<= (y & 7);   y >>= 1;
-        }
-        double ns = t.secs() * 1e9;
-        // 8 bitwise/shift ops per iteration.
-        res.bit_mops = (kIntIters * 8.0) / ns * 1000.0;
-        escape_result(static_cast<uint64_t>(x + y + z));
-    }
-
-    // Composite: geometric mean of the four sub-scores, then scaled.
+    res.add_mops = sum_add / R;
+    res.mul_mops = sum_mul / R;
+    res.div_mops = sum_div / R;
+    res.bit_mops = sum_bit / R;
     res.composite_mops = std::pow(res.add_mops * res.mul_mops *
                                   res.div_mops * res.bit_mops, 0.25);
 
@@ -316,122 +348,136 @@ struct FpResult {
 
 FpResult bench_fp() {
     show_progress("Floating-Point (scalar)");
+    constexpr int R = kBenchRounds;
     FpResult res{};
 
-    uint64_t s = runtime_seed();
-    float  fa = static_cast<float>((s & 0xFF) + 1);
-    float  fb = static_cast<float>(((s >> 8) & 0xFF) + 1);
-    double da = static_cast<double>((s >> 16) & 0xFF) + 1.0;
-    double db = static_cast<double>((s >> 24) & 0xFF) + 1.0;
+    double sum_sp_add = 0, sum_sp_mul = 0, sum_sp_div = 0, sum_sp_sqrt = 0;
+    double sum_dp_add = 0, sum_dp_mul = 0, sum_dp_div = 0, sum_dp_sqrt = 0;
 
-    // --- float add ---
-    {
-        float x = fa, y = fb, z = fa + fb;
-        Timer t;
-        for (int64_t i = 0; i < kFpIters; ++i) {
-            x += y;  y += z;  z += x;  x += y;
-            y += z;  z += x;  x += y;  y += z;
+    for (int round = 0; round < R; ++round) {
+        uint64_t s = runtime_seed() + static_cast<uint64_t>(round) * 0x9E3779B97F4A7C15ULL;
+        float  fa = static_cast<float>((s & 0xFF) + 1);
+        float  fb = static_cast<float>(((s >> 8) & 0xFF) + 1);
+        double da = static_cast<double>((s >> 16) & 0xFF) + 1.0;
+        double db = static_cast<double>((s >> 24) & 0xFF) + 1.0;
+
+        // --- float add ---
+        {
+            float x = fa, y = fb, z = fa + fb;
+            Timer t;
+            for (int64_t i = 0; i < kFpIters; ++i) {
+                x += y;  y += z;  z += x;  x += y;
+                y += z;  z += x;  x += y;  y += z;
+            }
+            double ns = t.secs() * 1e9;
+            sum_sp_add += (kFpIters * 8.0) / ns * 1000.0;
+            escape_result(static_cast<uint64_t>(x + y + z));
         }
-        double ns = t.secs() * 1e9;
-        res.sp_add = (kFpIters * 8.0) / ns * 1000.0;
-        escape_result(static_cast<uint64_t>(x + y + z));
+
+        // --- float mul ---
+        {
+            float x = fa, y = fb, z = fa + fb;
+            Timer t;
+            for (int64_t i = 0; i < kFpIters; ++i) {
+                x *= y;  y *= z;  z *= x;  x *= y;
+                y *= z;  z *= x;  x *= y;  y *= z;
+            }
+            double ns = t.secs() * 1e9;
+            sum_sp_mul += (kFpIters * 8.0) / ns * 1000.0;
+            escape_result(static_cast<uint64_t>(x + y + z));
+        }
+
+        // --- float div ---
+        {
+            float x = fa + 1.0f, y = fb + 1.0f, z = fa + fb + 1.0f;
+            Timer t;
+            for (int64_t i = 0; i < kFpIters / 2; ++i) {
+                x = (x + z) / y;  y = (y + x) / z;  z = (z + y) / x;
+                x = (x + z) / y;  y = (y + x) / z;
+            }
+            double ns = t.secs() * 1e9;
+            sum_sp_div += ((kFpIters / 2) * 5.0) / ns * 1000.0;
+            escape_result(static_cast<uint64_t>(x + y + z));
+        }
+
+        // --- float sqrt ---
+        {
+            float x = fa + 1.0f, y = fb + 1.0f;
+            Timer t;
+            for (int64_t i = 0; i < kFpIters / 4; ++i) {
+                x = std::sqrt(std::fabs(x) + 1.0f);
+                y = std::sqrt(std::fabs(y) + 1.0f);
+                x = std::sqrt(std::fabs(x) + 1.0f);
+                y = std::sqrt(std::fabs(y) + 1.0f);
+            }
+            double ns = t.secs() * 1e9;
+            sum_sp_sqrt += ((kFpIters / 4) * 4.0) / ns * 1000.0;
+            escape_result(static_cast<uint64_t>(x + y));
+        }
+
+        // --- double add ---
+        {
+            double x = da, y = db, z = da + db;
+            Timer t;
+            for (int64_t i = 0; i < kFpIters; ++i) {
+                x += y;  y += z;  z += x;  x += y;
+                y += z;  z += x;  x += y;  y += z;
+            }
+            double ns = t.secs() * 1e9;
+            sum_dp_add += (kFpIters * 8.0) / ns * 1000.0;
+            escape_result(static_cast<uint64_t>(x + y + z));
+        }
+
+        // --- double mul ---
+        {
+            double x = da, y = db, z = da + db;
+            Timer t;
+            for (int64_t i = 0; i < kFpIters; ++i) {
+                x *= y;  y *= z;  z *= x;  x *= y;
+                y *= z;  z *= x;  x *= y;  y *= z;
+            }
+            double ns = t.secs() * 1e9;
+            sum_dp_mul += (kFpIters * 8.0) / ns * 1000.0;
+            escape_result(static_cast<uint64_t>(x + y + z));
+        }
+
+        // --- double div ---
+        {
+            double x = da + 1.0, y = db + 1.0, z = da + db + 1.0;
+            Timer t;
+            for (int64_t i = 0; i < kFpIters / 2; ++i) {
+                x = (x + z) / y;  y = (y + x) / z;  z = (z + y) / x;
+                x = (x + z) / y;  y = (y + x) / z;
+            }
+            double ns = t.secs() * 1e9;
+            sum_dp_div += ((kFpIters / 2) * 5.0) / ns * 1000.0;
+            escape_result(static_cast<uint64_t>(x + y + z));
+        }
+
+        // --- double sqrt ---
+        {
+            double x = da + 1.0, y = db + 1.0;
+            Timer t;
+            for (int64_t i = 0; i < kFpIters / 4; ++i) {
+                x = std::sqrt(std::fabs(x) + 1.0);
+                y = std::sqrt(std::fabs(y) + 1.0);
+                x = std::sqrt(std::fabs(x) + 1.0);
+                y = std::sqrt(std::fabs(y) + 1.0);
+            }
+            double ns = t.secs() * 1e9;
+            sum_dp_sqrt += ((kFpIters / 4) * 4.0) / ns * 1000.0;
+            escape_result(static_cast<uint64_t>(x + y));
+        }
     }
 
-    // --- float mul ---
-    {
-        float x = fa, y = fb, z = fa + fb;
-        Timer t;
-        for (int64_t i = 0; i < kFpIters; ++i) {
-            x *= y;  y *= z;  z *= x;  x *= y;
-            y *= z;  z *= x;  x *= y;  y *= z;
-        }
-        double ns = t.secs() * 1e9;
-        res.sp_mul = (kFpIters * 8.0) / ns * 1000.0;
-        escape_result(static_cast<uint64_t>(x + y + z));
-    }
-
-    // --- float div ---
-    {
-        float x = fa + 1.0f, y = fb + 1.0f, z = fa + fb + 1.0f;
-        Timer t;
-        for (int64_t i = 0; i < kFpIters / 2; ++i) {
-            x = (x + z) / y;  y = (y + x) / z;  z = (z + y) / x;
-            x = (x + z) / y;  y = (y + x) / z;
-        }
-        double ns = t.secs() * 1e9;
-        res.sp_div = ((kFpIters / 2) * 5.0) / ns * 1000.0;
-        escape_result(static_cast<uint64_t>(x + y + z));
-    }
-
-    // --- float sqrt ---
-    {
-        float x = fa + 1.0f, y = fb + 1.0f;
-        Timer t;
-        for (int64_t i = 0; i < kFpIters / 4; ++i) {
-            x = std::sqrt(std::fabs(x) + 1.0f);
-            y = std::sqrt(std::fabs(y) + 1.0f);
-            x = std::sqrt(std::fabs(x) + 1.0f);
-            y = std::sqrt(std::fabs(y) + 1.0f);
-        }
-        double ns = t.secs() * 1e9;
-        res.sp_sqrt = ((kFpIters / 4) * 4.0) / ns * 1000.0;
-        escape_result(static_cast<uint64_t>(x + y));
-    }
-
-    // --- double add ---
-    {
-        double x = da, y = db, z = da + db;
-        Timer t;
-        for (int64_t i = 0; i < kFpIters; ++i) {
-            x += y;  y += z;  z += x;  x += y;
-            y += z;  z += x;  x += y;  y += z;
-        }
-        double ns = t.secs() * 1e9;
-        res.dp_add = (kFpIters * 8.0) / ns * 1000.0;
-        escape_result(static_cast<uint64_t>(x + y + z));
-    }
-
-    // --- double mul ---
-    {
-        double x = da, y = db, z = da + db;
-        Timer t;
-        for (int64_t i = 0; i < kFpIters; ++i) {
-            x *= y;  y *= z;  z *= x;  x *= y;
-            y *= z;  z *= x;  x *= y;  y *= z;
-        }
-        double ns = t.secs() * 1e9;
-        res.dp_mul = (kFpIters * 8.0) / ns * 1000.0;
-        escape_result(static_cast<uint64_t>(x + y + z));
-    }
-
-    // --- double div ---
-    {
-        double x = da + 1.0, y = db + 1.0, z = da + db + 1.0;
-        Timer t;
-        for (int64_t i = 0; i < kFpIters / 2; ++i) {
-            x = (x + z) / y;  y = (y + x) / z;  z = (z + y) / x;
-            x = (x + z) / y;  y = (y + x) / z;
-        }
-        double ns = t.secs() * 1e9;
-        res.dp_div = ((kFpIters / 2) * 5.0) / ns * 1000.0;
-        escape_result(static_cast<uint64_t>(x + y + z));
-    }
-
-    // --- double sqrt ---
-    {
-        double x = da + 1.0, y = db + 1.0;
-        Timer t;
-        for (int64_t i = 0; i < kFpIters / 4; ++i) {
-            x = std::sqrt(std::fabs(x) + 1.0);
-            y = std::sqrt(std::fabs(y) + 1.0);
-            x = std::sqrt(std::fabs(x) + 1.0);
-            y = std::sqrt(std::fabs(y) + 1.0);
-        }
-        double ns = t.secs() * 1e9;
-        res.dp_sqrt = ((kFpIters / 4) * 4.0) / ns * 1000.0;
-        escape_result(static_cast<uint64_t>(x + y));
-    }
-
+    res.sp_add = sum_sp_add / R;
+    res.sp_mul = sum_sp_mul / R;
+    res.sp_div = sum_sp_div / R;
+    res.sp_sqrt = sum_sp_sqrt / R;
+    res.dp_add = sum_dp_add / R;
+    res.dp_mul = sum_dp_mul / R;
+    res.dp_div = sum_dp_div / R;
+    res.dp_sqrt = sum_dp_sqrt / R;
     res.sp_composite = std::pow(res.sp_add * res.sp_mul *
                                 res.sp_div * res.sp_sqrt, 0.25);
     res.dp_composite = std::pow(res.dp_add * res.dp_mul *
@@ -457,68 +503,74 @@ struct MemBwResult {
 
 MemBwResult bench_mem_bandwidth() {
     show_progress("Memory Bandwidth (sequential)");
+    constexpr int R = kBenchRounds;
     MemBwResult res{};
 
     const int64_t elems = (kMemBufMB * 1024LL * 1024LL) / sizeof(uint64_t);
     std::vector<uint64_t> buf(elems);
-    uint64_t sink = 0;
 
-    // Fill buffer with non-zero data.
-    uint64_t s = runtime_seed();
-    for (int64_t i = 0; i < elems; ++i) {
-        buf[static_cast<size_t>(i)] = s + static_cast<uint64_t>(i);
-    }
+    double sum_read = 0, sum_write = 0, sum_copy = 0;
 
-    // --- Sequential read ---
-    {
-        // Warm up.
-        for (int r = 0; r < kWarmUpRounds; ++r) {
+    for (int round = 0; round < R; ++round) {
+        // Re-fill buffer with non-zero data each round.
+        uint64_t s = runtime_seed() + static_cast<uint64_t>(round) * 0x9E3779B97F4A7C15ULL;
+        for (int64_t i = 0; i < elems; ++i) {
+            buf[static_cast<size_t>(i)] = s + static_cast<uint64_t>(i);
+        }
+
+        // --- Sequential read ---
+        {
+            for (int r = 0; r < kWarmUpRounds; ++r) {
+                uint64_t tmp = 0;
+                for (int64_t i = 0; i < elems; ++i)
+                    tmp ^= buf[static_cast<size_t>(i)];
+                escape_result(tmp);
+            }
+            Timer t;
             uint64_t tmp = 0;
             for (int64_t i = 0; i < elems; ++i)
                 tmp ^= buf[static_cast<size_t>(i)];
+            double sec = t.secs();
             escape_result(tmp);
+            double bytes = static_cast<double>(elems * sizeof(uint64_t));
+            sum_read += bytes / sec / 1e9;
         }
-        Timer t;
-        uint64_t tmp = 0;
-        for (int64_t i = 0; i < elems; ++i)
-            tmp ^= buf[static_cast<size_t>(i)];
-        double sec = t.secs();
-        escape_result(tmp);
-        double bytes = static_cast<double>(elems * sizeof(uint64_t));
-        res.read_gbs = bytes / sec / 1e9;
-    }
 
-    // --- Sequential write ---
-    {
-        for (int r = 0; r < kWarmUpRounds; ++r) {
+        // --- Sequential write ---
+        {
+            for (int r = 0; r < kWarmUpRounds; ++r) {
+                for (int64_t i = 0; i < elems; ++i)
+                    buf[static_cast<size_t>(i)] = static_cast<uint64_t>(i);
+            }
+            Timer t;
             for (int64_t i = 0; i < elems; ++i)
                 buf[static_cast<size_t>(i)] = static_cast<uint64_t>(i);
+            double sec = t.secs();
+            double bytes = static_cast<double>(elems * sizeof(uint64_t));
+            sum_write += bytes / sec / 1e9;
+            escape_result(buf[0]);
         }
-        Timer t;
-        for (int64_t i = 0; i < elems; ++i)
-            buf[static_cast<size_t>(i)] = static_cast<uint64_t>(i);
-        double sec = t.secs();
-        double bytes = static_cast<double>(elems * sizeof(uint64_t));
-        res.write_gbs = bytes / sec / 1e9;
-        escape_result(buf[0]);  // prevent dead-store elimination
-    }
 
-    // --- Copy (read + write) ---
-    {
-        std::vector<uint64_t> dst(elems);
-        for (int r = 0; r < kWarmUpRounds; ++r) {
+        // --- Copy (read + write) ---
+        {
+            std::vector<uint64_t> dst(elems);
+            for (int r = 0; r < kWarmUpRounds; ++r) {
+                for (int64_t i = 0; i < elems; ++i)
+                    dst[static_cast<size_t>(i)] = buf[static_cast<size_t>(i)];
+            }
+            Timer t;
             for (int64_t i = 0; i < elems; ++i)
                 dst[static_cast<size_t>(i)] = buf[static_cast<size_t>(i)];
+            double sec = t.secs();
+            double bytes = static_cast<double>(elems * sizeof(uint64_t) * 2);
+            sum_copy += bytes / sec / 1e9;
+            escape_result(dst[0]);
         }
-        Timer t;
-        for (int64_t i = 0; i < elems; ++i)
-            dst[static_cast<size_t>(i)] = buf[static_cast<size_t>(i)];
-        double sec = t.secs();
-        // Both read and write count toward the data volume.
-        double bytes = static_cast<double>(elems * sizeof(uint64_t) * 2);
-        res.copy_gbs = bytes / sec / 1e9;
-        escape_result(dst[0]);
     }
+
+    res.read_gbs  = sum_read  / R;
+    res.write_gbs = sum_write / R;
+    res.copy_gbs  = sum_copy  / R;
 
     show_done(res.read_gbs, "GB/s (read)");
     return res;
@@ -548,71 +600,75 @@ static std::vector<int64_t> random_permutation(int64_t n, uint64_t seed) {
 
 MemLatResult bench_mem_latency() {
     show_progress("Memory Latency (pointer chase)");
+    constexpr int R = kBenchRounds;
     MemLatResult res{};
 
     const int64_t stride = 64 / sizeof(int64_t); // one cache line apart
     const int64_t elems = kLatIters;
-    // Use a stride to defeat hardware prefetchers.
-    std::vector<int64_t> buf(static_cast<size_t>(elems * stride));
 
-    // Build a linked list: buf[i * stride] = index of next node.
-    auto perm = random_permutation(elems, runtime_seed());
-    for (int64_t i = 0; i < elems; ++i) {
-        int64_t cur = i * stride;
-        int64_t nxt = perm[static_cast<size_t>(i)] * stride;
-        buf[static_cast<size_t>(cur)] = nxt;
-    }
+    double sum_lat = 0;
 
-    {
-        // Warm up.
-        int64_t idx = 0;
-        for (int64_t i = 0; i < elems / 10; ++i)
-            idx = buf[static_cast<size_t>(idx)];
-        escape_result(static_cast<uint64_t>(idx));
-
-        Timer t;
-        idx = 0;
-        for (int64_t i = 0; i < elems; ++i)
-            idx = buf[static_cast<size_t>(idx)];
-        double ns = t.secs() * 1e9;
-        escape_result(static_cast<uint64_t>(idx));
-        res.lat_ns = ns / static_cast<double>(elems);
-    }
-
-    // ---- Vary working-set size to reveal cache hierarchy ----
-    // Sizes from 4 KB to 64 MB, stepping by powers of two.
+    // Sizes from 4 KB to 128 MB, stepping by powers of two.
     const std::array<int64_t, 16> cache_sizes_kb = {
         4, 8, 16, 32, 64, 128, 256, 512,
         1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072
     };
+    std::vector<double> curve_sums(cache_sizes_kb.size(), 0.0);
 
-    for (int64_t size_kb : cache_sizes_kb) {
-        int64_t n = (size_kb * 1024) / (stride * static_cast<int64_t>(sizeof(int64_t)));
-        if (n < 16) n = 16;
-        if (n > elems) break;
+    for (int round = 0; round < R; ++round) {
+        uint64_t seed = runtime_seed() + static_cast<uint64_t>(round) * 0x9E3779B97F4A7C15ULL;
 
-        // Build pointer chain within the first n * stride elements.
-        auto perm_n = random_permutation(n, static_cast<uint64_t>(size_kb) * 7 + 1);
-        std::vector<int64_t> local_buf(static_cast<size_t>(n * stride));
-        for (int64_t i = 0; i < n; ++i) {
+        // --- Large-buffer pointer chase ---
+        std::vector<int64_t> buf(static_cast<size_t>(elems * stride));
+        auto perm = random_permutation(elems, seed);
+        for (int64_t i = 0; i < elems; ++i) {
             int64_t cur = i * stride;
-            int64_t nxt = perm_n[static_cast<size_t>(i)] * stride;
-            local_buf[static_cast<size_t>(cur)] = nxt;
+            int64_t nxt = perm[static_cast<size_t>(i)] * stride;
+            buf[static_cast<size_t>(cur)] = nxt;
+        }
+        {
+            int64_t idx = 0;
+            for (int64_t i = 0; i < elems / 10; ++i)
+                idx = buf[static_cast<size_t>(idx)];
+            escape_result(static_cast<uint64_t>(idx));
+            Timer t;
+            idx = 0;
+            for (int64_t i = 0; i < elems; ++i)
+                idx = buf[static_cast<size_t>(idx)];
+            double ns = t.secs() * 1e9;
+            escape_result(static_cast<uint64_t>(idx));
+            sum_lat += ns / static_cast<double>(elems);
         }
 
-        int64_t idx = 0;
-        // Warm up.
-        for (int64_t i = 0; i < kCacheIters / 10; ++i)
-            idx = local_buf[static_cast<size_t>(idx)];
+        // --- Per-size latency curve ---
+        for (size_t si = 0; si < cache_sizes_kb.size(); ++si) {
+            int64_t size_kb = cache_sizes_kb[si];
+            int64_t n = (size_kb * 1024) / (stride * static_cast<int64_t>(sizeof(int64_t)));
+            if (n < 16) n = 16;
+            if (n > elems) break;
 
-        Timer t;
-        for (int64_t i = 0; i < kCacheIters; ++i)
-            idx = local_buf[static_cast<size_t>(idx)];
-        double ns = t.secs() * 1e9;
-        escape_result(static_cast<uint64_t>(idx));
-        double lat = ns / static_cast<double>(kCacheIters);
-        res.curve.push_back(lat);
+            auto perm_n = random_permutation(n, static_cast<uint64_t>(size_kb) * 7 + seed);
+            std::vector<int64_t> local_buf(static_cast<size_t>(n * stride));
+            for (int64_t i = 0; i < n; ++i) {
+                int64_t cur = i * stride;
+                int64_t nxt = perm_n[static_cast<size_t>(i)] * stride;
+                local_buf[static_cast<size_t>(cur)] = nxt;
+            }
+            int64_t idx = 0;
+            for (int64_t i = 0; i < kCacheIters / 10; ++i)
+                idx = local_buf[static_cast<size_t>(idx)];
+            Timer t;
+            for (int64_t i = 0; i < kCacheIters; ++i)
+                idx = local_buf[static_cast<size_t>(idx)];
+            double ns = t.secs() * 1e9;
+            escape_result(static_cast<uint64_t>(idx));
+            curve_sums[si] += ns / static_cast<double>(kCacheIters);
+        }
     }
+
+    res.lat_ns = sum_lat / R;
+    for (double& v : curve_sums) v /= R;
+    res.curve = curve_sums;
 
     show_done(res.lat_ns, "ns (large-buffer average)");
     return res;
@@ -633,55 +689,53 @@ struct BranchResult {
 
 BranchResult bench_branch() {
     show_progress("Branch Prediction");
+    constexpr int R = kBenchRounds;
     BranchResult res{};
 
     const int64_t n = kBranchSize;
-    std::vector<int> data(static_cast<size_t>(n));
 
-    // Generate random data in [0, 255].
+    double sum_pred = 0, sum_unpred = 0;
+
+    // Generate base random data once, then derive sorted copy.
+    std::vector<int> data(static_cast<size_t>(n));
     {
         std::mt19937 rng(static_cast<unsigned>(runtime_seed()));
         std::uniform_int_distribution<int> dist(0, 255);
         for (int64_t i = 0; i < n; ++i)
             data[static_cast<size_t>(i)] = dist(rng);
     }
+    std::vector<int> sorted = data;
+    std::sort(sorted.begin(), sorted.end());
 
-    auto sum_if_lt_128 = [&](const std::vector<int>& d) {
-        int64_t sum = 0;
-        Timer t;
-        // The branch body includes a dependency chain to discourage
-        // the compiler from converting it into a conditional-select.
-        for (int64_t i = 0; i < n; ++i) {
-            if (d[static_cast<size_t>(i)] < 128) {
-                sum += d[static_cast<size_t>(i)];
-                sum ^= (sum << 7);
-            } else {
-                sum -= d[static_cast<size_t>(i)] / 2;
-                sum ^= (sum >> 5);
+    for (int round = 0; round < R; ++round) {
+        auto sum_if_lt_128 = [&](const std::vector<int>& d) {
+            int64_t sum = 0;
+            Timer t;
+            for (int64_t i = 0; i < n; ++i) {
+                if (d[static_cast<size_t>(i)] < 128) {
+                    sum += d[static_cast<size_t>(i)];
+                    sum ^= (sum << 7);
+                } else {
+                    sum -= d[static_cast<size_t>(i)] / 2;
+                    sum ^= (sum >> 5);
+                }
             }
-        }
-        double sec = t.secs();
-        escape_result(static_cast<uint64_t>(sum));
-        return static_cast<double>(n) / sec / 1e6;  // Melem/s
-    };
+            double sec = t.secs();
+            escape_result(static_cast<uint64_t>(sum));
+            return static_cast<double>(n) / sec / 1e6;  // Melem/s
+        };
 
-    // Predictable: sorted data (half < 128, half >= 128).
-    {
-        std::vector<int> sorted = data;
-        std::sort(sorted.begin(), sorted.end());
         // Warm up.
-        for (int r = 0; r < kWarmUpRounds; ++r)
+        for (int r = 0; r < kWarmUpRounds; ++r) {
             sum_if_lt_128(sorted);
-        res.predictable_mops = sum_if_lt_128(sorted);
-    }
-
-    // Unpredictable: random order (branch taken ~50% of the time randomly).
-    {
-        for (int r = 0; r < kWarmUpRounds; ++r)
             sum_if_lt_128(data);
-        res.unpredictable_mops = sum_if_lt_128(data);
+        }
+        sum_pred   += sum_if_lt_128(sorted);
+        sum_unpred += sum_if_lt_128(data);
     }
 
+    res.predictable_mops   = sum_pred   / R;
+    res.unpredictable_mops = sum_unpred / R;
     res.ratio = res.predictable_mops / std::max(res.unpredictable_mops, 0.001);
 
     show_done(res.ratio, "x (predictable / unpredictable speedup)");
@@ -702,51 +756,57 @@ struct CacheResult {
 
 CacheResult bench_cache_hierarchy() {
     show_progress("Cache Hierarchy Probing");
+    constexpr int R = kBenchRounds;
     CacheResult res;
 
-    // Test sizes from 2 KB to 64 MB.
     const std::array<int64_t, 18> sizes_kb = {
         2, 4, 8, 16, 32, 64, 128, 256, 512,
         1024, 2048, 4096, 8192, 16384, 32768, 65536,
         131072, 262144
     };
 
-    // Pre-allocate the largest buffer we will use.
+    // Pre-fill sizes vector (same every round).
+    for (int64_t sk : sizes_kb) res.sizes_kb.push_back(static_cast<double>(sk));
+    std::vector<double> bw_sums(sizes_kb.size(), 0.0);
+
     int64_t max_bytes = sizes_kb.back() * 1024;
-    std::vector<uint64_t> buf(static_cast<size_t>(max_bytes / sizeof(uint64_t)));
-    uint64_t s = runtime_seed();
-    for (size_t i = 0; i < buf.size(); ++i)
-        buf[i] = s + static_cast<uint64_t>(i);
 
-    for (int64_t size_kb : sizes_kb) {
-        int64_t bytes = size_kb * 1024;
-        int64_t elems = bytes / static_cast<int64_t>(sizeof(uint64_t));
-        // Access each element multiple times to get a stable measurement.
-        int64_t total_iters = std::max(kCacheIters * 2LL,
-                                       static_cast<int64_t>((64LL * 1024 * 1024) / sizeof(uint64_t) * 2));
-        int64_t reps = total_iters / elems;
-        if (reps < 1) reps = 1;
+    for (int round = 0; round < R; ++round) {
+        std::vector<uint64_t> buf(static_cast<size_t>(max_bytes / sizeof(uint64_t)));
+        uint64_t s = runtime_seed() + static_cast<uint64_t>(round) * 0x9E3779B97F4A7C15ULL;
+        for (size_t i = 0; i < buf.size(); ++i)
+            buf[i] = s + static_cast<uint64_t>(i);
 
-        // Warm up.
-        uint64_t tmp = 0;
-        for (int64_t r = 0; r < reps / 4; ++r)
-            for (int64_t i = 0; i < elems; ++i)
-                tmp ^= buf[static_cast<size_t>(i)];
-        escape_result(tmp);
+        for (size_t si = 0; si < sizes_kb.size(); ++si) {
+            int64_t size_kb = sizes_kb[si];
+            int64_t bytes = size_kb * 1024;
+            int64_t elems = bytes / static_cast<int64_t>(sizeof(uint64_t));
+            int64_t total_iters = std::max(kCacheIters * 2LL,
+                                static_cast<int64_t>((64LL * 1024 * 1024) / sizeof(uint64_t) * 2));
+            int64_t reps = total_iters / elems;
+            if (reps < 1) reps = 1;
 
-        Timer t;
-        tmp = 0;
-        for (int64_t r = 0; r < reps; ++r)
-            for (int64_t i = 0; i < elems; ++i)
-                tmp ^= buf[static_cast<size_t>(i)];
-        double sec = t.secs();
-        escape_result(tmp);
+            uint64_t tmp = 0;
+            for (int64_t r = 0; r < reps / 4; ++r)
+                for (int64_t i = 0; i < elems; ++i)
+                    tmp ^= buf[static_cast<size_t>(i)];
+            escape_result(tmp);
 
-        double total_bytes = static_cast<double>(reps * elems * sizeof(uint64_t));
-        double gbs = total_bytes / sec / 1e9;
-        res.sizes_kb.push_back(static_cast<double>(size_kb));
-        res.bw_gbs.push_back(gbs);
+            Timer t;
+            tmp = 0;
+            for (int64_t r = 0; r < reps; ++r)
+                for (int64_t i = 0; i < elems; ++i)
+                    tmp ^= buf[static_cast<size_t>(i)];
+            double sec = t.secs();
+            escape_result(tmp);
+
+            double total_bytes = static_cast<double>(reps * elems * sizeof(uint64_t));
+            bw_sums[si] += total_bytes / sec / 1e9;
+        }
     }
+
+    for (double& v : bw_sums) v /= R;
+    res.bw_gbs = bw_sums;
 
     show_done(res.bw_gbs[0], "GB/s (L1 peak)");
     return res;
@@ -767,49 +827,52 @@ struct IlpResult {
 
 IlpResult bench_ilp() {
     show_progress("Instruction-Level Parallelism");
+    constexpr int R = kBenchRounds;
     IlpResult res{};
 
-    uint64_t s = runtime_seed();
     const int64_t iters = kIntIters;
+    double sum_dep = 0, sum_ind = 0;
 
-    // --- Dependent chain ---
-    // Each operation depends on the result of the previous one.
-    {
-        int64_t x = static_cast<int64_t>(s & 0xFFFF);
-        Timer t;
-        for (int64_t i = 0; i < iters; ++i) {
-            x = ((x * 3 + 7) ^ (x >> 5)) + (x << 2);
-            // Single dependency chain — only one op in flight at a time.
+    for (int round = 0; round < R; ++round) {
+        uint64_t s = runtime_seed() + static_cast<uint64_t>(round) * 0x9E3779B97F4A7C15ULL;
+
+        // --- Dependent chain ---
+        {
+            int64_t x = static_cast<int64_t>(s & 0xFFFF);
+            Timer t;
+            for (int64_t i = 0; i < iters; ++i) {
+                x = ((x * 3 + 7) ^ (x >> 5)) + (x << 2);
+            }
+            double ns = t.secs() * 1e9;
+            sum_dep += static_cast<double>(iters * 5) / ns;
+            escape_result(static_cast<uint64_t>(x));
         }
-        double ns = t.secs() * 1e9;
-        res.dep_ops_per_ns = static_cast<double>(iters * 5) / ns; // ~5 ops/iter
-        escape_result(static_cast<uint64_t>(x));
+
+        // --- Independent operations ---
+        {
+            int64_t a = static_cast<int64_t>(s & 0xFF);
+            int64_t b = static_cast<int64_t>((s >> 8) & 0xFF);
+            int64_t c = static_cast<int64_t>((s >> 16) & 0xFF);
+            int64_t d = static_cast<int64_t>((s >> 24) & 0xFF);
+            int64_t e = static_cast<int64_t>((s >> 32) & 0xFF);
+            int64_t f = static_cast<int64_t>((s >> 40) & 0xFF);
+            Timer t;
+            for (int64_t i = 0; i < iters; ++i) {
+                a = ((a * 3 + 7) ^ (a >> 3)) + (a << 2);
+                b = ((b * 5 + 11) ^ (b >> 4)) + (b << 1);
+                c = ((c * 7 + 13) ^ (c >> 2)) + (c << 3);
+                d = ((d * 9 + 17) ^ (d >> 6)) + (d << 4);
+                e = ((e * 11 + 19) ^ (e >> 1)) + (e << 5);
+                f = ((f * 13 + 23) ^ (f >> 7)) + (f << 6);
+            }
+            double ns = t.secs() * 1e9;
+            sum_ind += static_cast<double>(iters * 5 * 6) / ns;
+            escape_result(static_cast<uint64_t>(a + b + c + d + e + f));
+        }
     }
 
-    // --- Independent operations ---
-    // Multiple independent chains allow the CPU to issue them in parallel.
-    {
-        int64_t a = static_cast<int64_t>(s & 0xFF);
-        int64_t b = static_cast<int64_t>((s >> 8) & 0xFF);
-        int64_t c = static_cast<int64_t>((s >> 16) & 0xFF);
-        int64_t d = static_cast<int64_t>((s >> 24) & 0xFF);
-        int64_t e = static_cast<int64_t>((s >> 32) & 0xFF);
-        int64_t f = static_cast<int64_t>((s >> 40) & 0xFF);
-        Timer t;
-        for (int64_t i = 0; i < iters; ++i) {
-            a = ((a * 3 + 7) ^ (a >> 3)) + (a << 2);
-            b = ((b * 5 + 11) ^ (b >> 4)) + (b << 1);
-            c = ((c * 7 + 13) ^ (c >> 2)) + (c << 3);
-            d = ((d * 9 + 17) ^ (d >> 6)) + (d << 4);
-            e = ((e * 11 + 19) ^ (e >> 1)) + (e << 5);
-            f = ((f * 13 + 23) ^ (f >> 7)) + (f << 6);
-            // Six independent chains → up to 6x throughput.
-        }
-        double ns = t.secs() * 1e9;
-        res.ind_ops_per_ns = static_cast<double>(iters * 5 * 6) / ns;
-        escape_result(static_cast<uint64_t>(a + b + c + d + e + f));
-    }
-
+    res.dep_ops_per_ns = sum_dep / R;
+    res.ind_ops_per_ns = sum_ind / R;
     res.ilp_factor = res.ind_ops_per_ns / std::max(res.dep_ops_per_ns, 0.001);
 
     show_done(res.ilp_factor, "x (ILP speedup factor)");
@@ -844,62 +907,70 @@ static double mt_kernel_work(int64_t steps) {
 
 MtResult bench_multithread(const SysInfo& sys) {
     show_progress("Multi-Threaded Scaling");
+    constexpr int R = kBenchRounds;
     MtResult res;
 
     const int max_threads = std::min(static_cast<int>(sys.hw_threads), 64);
     const int64_t steps_per_thread = 2'000'000;
 
-    // Measure single-thread baseline (throughput in steps/sec).
-    double baseline_steps_per_sec = 0;
-    {
-        // Warm up.
-        mt_kernel_work(steps_per_thread / 10);
-        Timer t;
-        volatile double sink = mt_kernel_work(steps_per_thread);
-        double sec = t.secs();
-        baseline_steps_per_sec = static_cast<double>(steps_per_thread) / std::max(sec, 1e-9);
-        escape_result(static_cast<uint64_t>(sink * 1e6));
-    }
-
-    res.thread_counts.push_back(1);
-    res.throughputs.push_back(baseline_steps_per_sec);
-    res.speedups.push_back(1.0);
-
     // Test powers of two plus the maximum thread count.
     std::vector<int> counts;
+    counts.push_back(1);
     for (int t = 2; t <= max_threads; t *= 2)
         counts.push_back(t);
-    if (counts.empty() || counts.back() != max_threads)
+    if (counts.back() != max_threads)
         counts.push_back(max_threads);
 
-    for (int num_threads : counts) {
-        if (num_threads <= 1) continue;
+    // Accumulators: one per thread count.
+    std::vector<double> tp_sums(counts.size(), 0.0);
 
-        std::atomic<int64_t> global_work{0};
-        std::atomic<double>  global_sum{0.0};
-        std::vector<std::thread> threads;
-
-        Timer wall_t;
-        for (int t = 0; t < num_threads; ++t) {
-            threads.emplace_back([&, steps_per_thread]() {
-                double sum = mt_kernel_work(steps_per_thread);
-                global_work.fetch_add(steps_per_thread, std::memory_order_relaxed);
-                // Atomic store — the compiler must keep this side-effect.
-                global_sum.store(sum, std::memory_order_relaxed);
-            });
+    for (int round = 0; round < R; ++round) {
+        // Single-thread baseline for this round.
+        double baseline_steps_per_sec = 0;
+        {
+            mt_kernel_work(steps_per_thread / 10);  // warm up
+            Timer t;
+            volatile double sink = mt_kernel_work(steps_per_thread);
+            double sec = t.secs();
+            baseline_steps_per_sec = static_cast<double>(steps_per_thread) / std::max(sec, 1e-9);
+            escape_result(static_cast<uint64_t>(sink * 1e6));
         }
-        for (auto& th : threads) th.join();
 
-        double wall_sec = wall_t.secs();
-        // Throughput: total work (steps) / wall time (sec).
-        double tp = static_cast<double>(global_work.load()) /
-                    std::max(wall_sec, 1e-9);
-        escape_result(static_cast<uint64_t>(global_sum.load() * 1e9));
+        for (size_t ci = 0; ci < counts.size(); ++ci) {
+            int num_threads = counts[ci];
+            if (num_threads == 1) {
+                tp_sums[ci] += baseline_steps_per_sec;
+                continue;
+            }
 
-        double speedup = tp / baseline_steps_per_sec;
-        res.thread_counts.push_back(num_threads);
-        res.throughputs.push_back(tp);
-        res.speedups.push_back(speedup);
+            std::atomic<int64_t> global_work{0};
+            std::atomic<double>  global_sum{0.0};
+            std::vector<std::thread> threads;
+
+            Timer wall_t;
+            for (int t = 0; t < num_threads; ++t) {
+                threads.emplace_back([&, steps_per_thread]() {
+                    double sum = mt_kernel_work(steps_per_thread);
+                    global_work.fetch_add(steps_per_thread, std::memory_order_relaxed);
+                    global_sum.store(sum, std::memory_order_relaxed);
+                });
+            }
+            for (auto& th : threads) th.join();
+
+            double wall_sec = wall_t.secs();
+            double tp = static_cast<double>(global_work.load()) /
+                        std::max(wall_sec, 1e-9);
+            escape_result(static_cast<uint64_t>(global_sum.load() * 1e9));
+            tp_sums[ci] += tp;
+        }
+    }
+
+    // Compute averages and speedups.
+    for (size_t ci = 0; ci < counts.size(); ++ci) {
+        double avg_tp = tp_sums[ci] / R;
+        res.thread_counts.push_back(counts[ci]);
+        res.throughputs.push_back(avg_tp);
+        res.speedups.push_back(avg_tp / (tp_sums[0] / R));
     }
 
     // Find peak.
@@ -931,6 +1002,7 @@ struct MatMulResult {
 // Naive but cache-friendly (loop order i-k-j for better locality).
 MatMulResult bench_matmul() {
     show_progress("Matrix Multiplication (float)");
+    constexpr int R = kBenchRounds;
     MatMulResult res{};
     res.matrix_size = kMatMulN;
 
@@ -939,16 +1011,7 @@ MatMulResult bench_matmul() {
     std::vector<float> B(static_cast<size_t>(n * n));
     std::vector<float> C(static_cast<size_t>(n * n), 0.0f);
 
-    // Initialize matrices with deterministic "random" values.
-    uint64_t s = runtime_seed();
-    for (int64_t i = 0; i < n * n; ++i) {
-        s = s * 1103515245 + 12345;  // simple LCG
-        A[static_cast<size_t>(i)] = static_cast<float>((s & 0xFFFF)) / 65536.0f;
-        B[static_cast<size_t>(i)] = static_cast<float>(((s >> 16) & 0xFFFF)) / 65536.0f;
-    }
-
     auto mul = [&]() {
-        // i-k-j loop for better cache behaviour on B and C.
         for (int64_t i = 0; i < n; ++i) {
             for (int64_t k = 0; k < n; ++k) {
                 float aik = A[static_cast<size_t>(i * n + k)];
@@ -960,23 +1023,33 @@ MatMulResult bench_matmul() {
         }
     };
 
-    // Warm up.
-    {
+    double sum_gflops = 0;
+
+    for (int round = 0; round < R; ++round) {
+        // Re-initialize with round-specific seed.
+        uint64_t s = runtime_seed() + static_cast<uint64_t>(round) * 0x9E3779B97F4A7C15ULL;
+        for (int64_t i = 0; i < n * n; ++i) {
+            s = s * 1103515245 + 12345;
+            A[static_cast<size_t>(i)] = static_cast<float>((s & 0xFFFF)) / 65536.0f;
+            B[static_cast<size_t>(i)] = static_cast<float>(((s >> 16) & 0xFFFF)) / 65536.0f;
+        }
+
+        // Warm up.
         std::fill(C.begin(), C.end(), 0.0f);
         mul();
+        // Measure.
+        std::fill(C.begin(), C.end(), 0.0f);
+        Timer t;
+        mul();
+        double sec = t.secs();
+        escape_result(static_cast<uint64_t>(C[0] * 1e9f));
+
+        double total_ops = 2.0 * static_cast<double>(n) *
+                           static_cast<double>(n) * static_cast<double>(n);
+        sum_gflops += total_ops / sec / 1e9;
     }
-    // Re-fill C with zeros and measure.
-    std::fill(C.begin(), C.end(), 0.0f);
-    Timer t;
-    mul();
-    double sec = t.secs();
 
-    escape_result(static_cast<uint64_t>(C[0] * 1e9f));
-
-    // 2 * N^3 floating-point ops.
-    double total_ops = 2.0 * static_cast<double>(n) *
-                       static_cast<double>(n) * static_cast<double>(n);
-    res.gflops = total_ops / sec / 1e9;
+    res.gflops = sum_gflops / R;
 
     show_done(res.gflops, "GFLOPS");
     return res;
@@ -994,12 +1067,13 @@ struct SortResult {
 
 SortResult bench_sort() {
     show_progress("Sorting Throughput (std::sort)");
+    constexpr int R = kBenchRounds;
     SortResult res{};
 
     const int64_t n = kSortSize;
     std::vector<int64_t> data(static_cast<size_t>(n));
 
-    // Generate random data.
+    // Generate base random data once.
     {
         std::mt19937_64 rng(runtime_seed());
         std::uniform_int_distribution<int64_t> dist;
@@ -1007,23 +1081,23 @@ SortResult bench_sort() {
             data[static_cast<size_t>(i)] = dist(rng);
     }
 
-    // Copy to avoid measuring generation time.
     std::vector<int64_t> work(static_cast<size_t>(n));
+    double sum_mps = 0;
 
-    // Warm up.
-    {
+    for (int round = 0; round < R; ++round) {
+        // Warm up.
         std::copy(data.begin(), data.end(), work.begin());
         std::sort(work.begin(), work.end());
-    }
-
-    {
+        // Measure.
         std::copy(data.begin(), data.end(), work.begin());
         Timer t;
         std::sort(work.begin(), work.end());
         double sec = t.secs();
         escape_result(static_cast<uint64_t>(work[0]));
-        res.melem_per_sec = static_cast<double>(n) / sec / 1e6;
+        sum_mps += static_cast<double>(n) / sec / 1e6;
     }
+
+    res.melem_per_sec = sum_mps / R;
 
     show_done(res.melem_per_sec, "Melem/s");
     return res;
@@ -1042,35 +1116,42 @@ struct HashResult {
 
 HashResult bench_hash() {
     show_progress("Hash / Mix Throughput");
+    constexpr int R = kBenchRounds;
     HashResult res{};
 
     int64_t bytes = kHashMB * 1024LL * 1024LL;
     int64_t elems = bytes / sizeof(uint64_t);
     std::vector<uint64_t> buf(static_cast<size_t>(elems));
-    uint64_t s = runtime_seed();
-    for (int64_t i = 0; i < elems; ++i)
-        buf[static_cast<size_t>(i)] = s + static_cast<uint64_t>(i) * 0x9E3779B97F4A7C15ULL;
 
-    // Warm up.
-    {
+    double sum_mbs = 0;
+
+    for (int round = 0; round < R; ++round) {
+        uint64_t s = runtime_seed() + static_cast<uint64_t>(round) * 0x9E3779B97F4A7C15ULL;
+        for (int64_t i = 0; i < elems; ++i)
+            buf[static_cast<size_t>(i)] = s + static_cast<uint64_t>(i) * 0x9E3779B97F4A7C15ULL;
+
+        // Warm up.
+        {
+            uint64_t h = 0x811C9DC5ULL;
+            for (int64_t i = 0; i < elems; ++i) {
+                h ^= buf[static_cast<size_t>(i)];
+                h *= 0x01000193ULL;
+            }
+            escape_result(h);
+        }
+
         uint64_t h = 0x811C9DC5ULL;
+        Timer t;
         for (int64_t i = 0; i < elems; ++i) {
             h ^= buf[static_cast<size_t>(i)];
             h *= 0x01000193ULL;
         }
+        double sec = t.secs();
         escape_result(h);
+        sum_mbs += static_cast<double>(bytes) / sec / 1e6;
     }
 
-    uint64_t h = 0x811C9DC5ULL;
-    Timer t;
-    for (int64_t i = 0; i < elems; ++i) {
-        h ^= buf[static_cast<size_t>(i)];
-        h *= 0x01000193ULL;
-    }
-    double sec = t.secs();
-    escape_result(h);
-
-    res.mbs = static_cast<double>(bytes) / sec / 1e6;
+    res.mbs = sum_mbs / R;
 
     show_done(res.mbs, "MB/s");
     return res;
@@ -1341,7 +1422,7 @@ int main() {
     FinalReport report;
 
     // Run all benchmarks.
-    std::cout << "--- Benchmarking ---\n";
+    std::cout << "--- Benchmarking (" << kBenchRounds << " rounds each, results averaged) ---\n";
     report.int_res   = bench_integer();
     report.fp_res    = bench_fp();
     report.bw_res    = bench_mem_bandwidth();

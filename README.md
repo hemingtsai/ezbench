@@ -17,7 +17,33 @@ g++ -std=c++17 -O2 -pthread -o ezbench ezbench.cpp
 ./ezbench
 ```
 
-The entire benchmark runs in **30–120 seconds** depending on your CPU.
+Each benchmark runs **3 independent rounds** (configurable via `kBenchRounds`)
+and reports the arithmetic mean for stable, reproducible results.
+Total runtime: **60–180 seconds** depending on your CPU.
+
+---
+
+## Supported Architectures
+
+| Architecture | Detection Macro |
+|---|---|
+| **x86-64** | `__x86_64__` / `_M_X64` |
+| **x86-32** | `__i386__` / `_M_IX86` |
+| **AArch64** (ARM 64-bit) | `__aarch64__` / `_M_ARM64` |
+| **ARM 32-bit (armhf)** | `__arm__` + `__ARM_PCS_VFP` |
+| **ARM 32-bit (soft-float)** | `__arm__` (no VFP) |
+| **RISC-V 64-bit** | `__riscv` + `__riscv_xlen == 64` |
+| **RISC-V 32-bit** | `__riscv` + `__riscv_xlen == 32` |
+| **LoongArch 64-bit** | `__loongarch64` |
+| **LoongArch 32-bit** | `__loongarch__` |
+| **PowerPC 64-bit** | `__powerpc64__` / `__ppc64__` |
+| **PowerPC 32-bit** | `__powerpc__` / `__ppc__` |
+| **IBM z/Architecture (s390x)** | `__s390x__` |
+| **IBM S/390 (31-bit)** | `__s390__` |
+| **MIPS 64-bit** | `__mips64` |
+| **MIPS 32-bit** | `__mips__` |
+
+All detection is purely compile-time via pre-defined compiler macros — zero runtime probing.
 
 ---
 
@@ -72,8 +98,9 @@ A machine-readable CSV summary line is printed at the end for scripting:
   conforming C++17 toolchain.
 - **Fair measurement** — runtime-dependent seeds prevent compile-time folding;
   `volatile` escape barriers prevent dead-code elimination; warm-up rounds
-  stabilise cache and frequency state before timing.
-- **Single file** — everything in `ezbench.cpp` with a navigable index at the top.
+  stabilise cache and frequency state before timing; **3 independent rounds
+  averaged** to suppress OS scheduling noise and thermal transients.
+- **Single file** — everything in `ezbench.cpp` (~1500 lines) with a navigable index at the top.
 - **All comments in English.**
 
 ---
