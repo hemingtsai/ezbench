@@ -2115,19 +2115,18 @@ struct JsonResult { double mbs; };
 JsonResult bench_json() {
     show_progress("JSON Parsing (recursive descent)");
     constexpr int R=kBenchRounds;
-    // Build a nested JSON string
+    // Build a larger nested JSON string for meaningful timing.
     std::ostringstream jss;
-    jss << "{"; for(int i=0;i<50;++i){ jss<<"\"key"<<i<<"\":{"; for(int j=0;j<20;++j) jss<<"\"f"<<j<<"\":"<<(i*j%1000)<<","; jss<<"\"arr"<<i<<"\":["; for(int k=0;k<10;++k) jss<<(k>0?",":"")<<"{\"x\":"<<k<<",\"y\":"<<(k*2)<<"}"; jss<<"]},"; } jss<<"\"end\":null}";
+    jss << "{"; for(int i=0;i<500;++i){ jss<<"\"key"<<i<<"\":{"; for(int j=0;j<20;++j) jss<<"\"f"<<j<<"\":"<<(i*j%1000)<<","; jss<<"\"arr"<<i<<"\":["; for(int k=0;k<10;++k) jss<<(k>0?",":"")<<"{\"x\":"<<k<<",\"y\":"<<(k*2)<<"}"; jss<<"]},"; } jss<<"\"end\":null}";
     std::string json = jss.str();
-    struct JVal { int type; double num; std::string str; std::vector<JVal> arr; std::map<std::string,JVal> obj; }; // simplified (unused in counting)
     double sum=0;
     for(int round=0;round<R;++round){
-        // Simple recursive descent parser counting nodes
         size_t pos=0; auto skipWS=[&]{while(pos<json.size()&&(json[pos]==' '||json[pos]=='\n'||json[pos]=='\t'||json[pos]=='\r'))pos++;};
         std::function<int()> parse; parse=[&]()->int{skipWS();int nodes=1;if(json[pos]=='{'){pos++;skipWS();if(json[pos]!='}')while(true){skipWS();pos++;skipWS();pos++;parse();skipWS();if(json[pos]==',')pos++;else break;}pos++;}else if(json[pos]=='['){pos++;skipWS();if(json[pos]!=']')while(true){parse();skipWS();if(json[pos]==',')pos++;else break;}pos++;}else if(json[pos]=='"'){pos++;while(pos<json.size()&&json[pos]!='"')pos++;pos++;}else{while(pos<json.size()&&(isdigit(json[pos])||json[pos]=='-'||json[pos]=='.'||json[pos]=='e'))pos++;}return nodes;};
-        parse(); // warm up
+        // Parse twice to warm up I-cache.
+        pos=0; parse();
         pos=0; Timer t; int nodes=parse();
-        double sec=t.secs();escape_result(static_cast<uint64_t>(nodes));
+        double sec=std::max(t.secs(),1e-9); escape_result(static_cast<uint64_t>(nodes));
         sum+=static_cast<double>(json.size())/sec/1e6;
     }
     JsonResult res; res.mbs=sum/R;
@@ -3034,6 +3033,7 @@ static double compute_overall(const FinalReport& r) {
     double log_sum = 0.0;
     for (double s : scores) {
         if (s <= 0.0) s = 0.01;
+        if (!std::isfinite(s) || s > 10000.0) s = 10000.0;
         log_sum += std::log(s);
     }
     return std::exp(log_sum / static_cast<double>(scores.size()));
