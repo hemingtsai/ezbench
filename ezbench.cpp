@@ -113,13 +113,13 @@ static constexpr int      kSwSeqLen       =         500;  // Smith-Waterman seq 
 static constexpr int      kIzhNeurons     =         200;  // Izhikevich neurons
 static constexpr int      kIzhSteps       =         500;  // Izhikevich time steps
 static constexpr int64_t  kLuN            =         400;  // LU matrix size
-static constexpr int      kOdeSteps       =       50000;  // ODE solver steps
-static constexpr int      kKaratsubaBits  =       16384;  // BigInt bits
-static constexpr int64_t  kRegexMB        =           8;  // regex input MB
-static constexpr int64_t  kJsonMB         =           8;  // JSON input MB (approx)
+static constexpr int      kOdeSteps       =      200000;  // ODE solver steps
+static constexpr int      kAstNodes       =     2000000;  // AST nodes
+static constexpr int      kKaratsubaBits  =       32768;  // BigInt bits
+static constexpr int64_t  kRegexMB        =          32;  // regex input MB
+static constexpr int64_t  kJsonMB         =          32;  // JSON input MB (approx)
 static constexpr int64_t  kAllocOps       =     2000000;  // alloc/free ops
 static constexpr int64_t  kAtomicIters    =   20'000'000;  // atomic inc iterations
-static constexpr int      kAstNodes       =      500000;  // AST nodes
 static constexpr int64_t  kParseTokens    =     500000;  // parser tokens
 static constexpr int64_t  kVmInsns       =   2'000'000;  // VM instructions
 static constexpr int64_t  kAesMB          =          16;  // AES input MB
@@ -130,7 +130,7 @@ static constexpr int      kRasterTris     =       20000;  // raster triangles
   // AI inference batch size
 
 static constexpr int      kWarmUpRounds   =           2;   // warm-up iterations
-static constexpr int      kBenchRounds    =           1;   // measurement rounds
+static constexpr int      kBenchRounds    =           3;   // measurement rounds (averaged)
 
 // ============================================================================
 // Section 2 — Utility Classes & Helpers
@@ -2117,7 +2117,7 @@ JsonResult bench_json() {
     constexpr int R=kBenchRounds;
     // Build a larger nested JSON string for meaningful timing.
     std::ostringstream jss;
-    jss << "{"; for(int i=0;i<500;++i){ jss<<"\"key"<<i<<"\":{"; for(int j=0;j<20;++j) jss<<"\"f"<<j<<"\":"<<(i*j%1000)<<","; jss<<"\"arr"<<i<<"\":["; for(int k=0;k<10;++k) jss<<(k>0?",":"")<<"{\"x\":"<<k<<",\"y\":"<<(k*2)<<"}"; jss<<"]},"; } jss<<"\"end\":null}";
+    jss << "{"; for(int i=0;i<1000;++i){ jss<<"\"key"<<i<<"\":{"; for(int j=0;j<30;++j) jss<<"\"f"<<j<<"\":"<<(i*j%1000)<<","; jss<<"\"arr"<<i<<"\":["; for(int k=0;k<10;++k) jss<<(k>0?",":"")<<"{\"x\":"<<k<<",\"y\":"<<(k*2)<<"}"; jss<<"]},"; } jss<<"\"end\":null}";
     std::string json = jss.str();
     double sum=0;
     for(int round=0;round<R;++round){
