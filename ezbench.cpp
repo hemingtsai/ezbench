@@ -832,7 +832,7 @@ CacheResult bench_cache_hierarchy() {
             int64_t size_kb = sizes_kb[si];
             int64_t bytes = size_kb * 1024;
             int64_t elems = bytes / static_cast<int64_t>(sizeof(uint64_t));
-            int64_t total_iters = std::max(kCacheIters * 2LL,
+            int64_t total_iters = std::max(static_cast<int64_t>(kCacheIters * 2),
                                 static_cast<int64_t>((64LL * 1024 * 1024) / sizeof(uint64_t) * 2));
             int64_t reps = total_iters / elems;
             if (reps < 1) reps = 1;
