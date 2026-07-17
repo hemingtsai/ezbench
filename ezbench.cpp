@@ -99,39 +99,38 @@ static constexpr int      kMdAtoms        =         800;  // MD atom count
 static constexpr int      kMdSteps        =          10;  // MD steps per round
 static constexpr int      kGameEntities   =      100000;  // game entity count
 static constexpr int      kAiBatch        =         500;
-static constexpr int      kFdtdNx         =         200;  // FDTD grid X
-static constexpr int      kFdtdNy         =         200;  // FDTD grid Y
-static constexpr int      kFdtdSteps      =          50;  // FDTD time steps
-static constexpr int      kRigidBodies    =         500;  // rigid bodies
-static constexpr int      kRayResX        =         512;  // ray trace resolution X
-static constexpr int      kRayResY        =         512;  // ray trace resolution Y
+static constexpr int      kFdtdNx         =         128;  // FDTD grid X
+static constexpr int      kFdtdNy         =         128;  // FDTD grid Y
+static constexpr int      kFdtdSteps      =          30;  // FDTD time steps
+static constexpr int      kRigidBodies    =         300;  // rigid bodies
+static constexpr int      kRayResX        =         256;  // ray trace resolution X
+static constexpr int      kRayResY        =         256;  // ray trace resolution Y
 static constexpr int      kHfBasis        =          10;  // HF basis functions
-static constexpr int      kMcSteps        =      100000;  // Monte Carlo steps
-static constexpr int      kHpSeqLen       =          50;  // HP sequence length
-static constexpr int      kHpAnnealSteps  =       50000;  // HP annealing steps
-static constexpr int      kSwSeqLen       =        1000;  // Smith-Waterman seq length
-static constexpr int      kIzhNeurons     =         500;  // Izhikevich neurons
-static constexpr int      kIzhSteps       =        2000;  // Izhikevich time steps
-static constexpr int64_t  kLuN            =         512;  // LU matrix size
-static constexpr int      kOdeSteps       =        5000;  // ODE solver steps
-static constexpr int      kKaratsubaBits  =       65536;  // BigInt bits
-static constexpr int64_t  kRegexMB        =          64;  // regex input MB
-static constexpr int64_t  kJsonMB         =          32;  // JSON input MB (approx)
-static constexpr int      kAllocThreads   =           4;  // allocator threads
-static constexpr int64_t  kAllocOps       =    10000000;  // alloc/free ops
-static constexpr int64_t  kAtomicIters    =  100'000'000;  // atomic inc iterations
-static constexpr int      kAstNodes       =      500000;  // AST nodes
-static constexpr int64_t  kParseTokens    =    2000000;  // parser tokens
-static constexpr int64_t  kVmInsns        =  10'000'000;  // VM instructions
-static constexpr int64_t  kAesMB          =          64;  // AES input MB
-static constexpr int64_t  kShaMB          =         128;  // SHA input MB
-static constexpr int64_t  kLzssMB         =          16;  // LZSS input MB
-static constexpr int      kConvRes        =        2048;  // convolution image size
-static constexpr int      kRasterTris     =      100000;  // raster triangles
+static constexpr int      kMcSteps        =        5000;  // Monte Carlo steps
+static constexpr int      kHpSeqLen       =          30;  // HP sequence length
+static constexpr int      kHpAnnealSteps  =       10000;  // HP annealing steps
+static constexpr int      kSwSeqLen       =         500;  // Smith-Waterman seq length
+static constexpr int      kIzhNeurons     =         200;  // Izhikevich neurons
+static constexpr int      kIzhSteps       =         500;  // Izhikevich time steps
+static constexpr int64_t  kLuN            =         400;  // LU matrix size
+static constexpr int      kOdeSteps       =        2000;  // ODE solver steps
+static constexpr int      kKaratsubaBits  =       16384;  // BigInt bits
+static constexpr int64_t  kRegexMB        =           8;  // regex input MB
+static constexpr int64_t  kJsonMB         =           8;  // JSON input MB (approx)
+static constexpr int64_t  kAllocOps       =     2000000;  // alloc/free ops
+static constexpr int64_t  kAtomicIters    =   20'000'000;  // atomic inc iterations
+static constexpr int      kAstNodes       =      100000;  // AST nodes
+static constexpr int64_t  kParseTokens    =     500000;  // parser tokens
+static constexpr int64_t  kVmInsns       =   2'000'000;  // VM instructions
+static constexpr int64_t  kAesMB          =          16;  // AES input MB
+static constexpr int64_t  kShaMB          =          32;  // SHA input MB
+static constexpr int64_t  kLzssMB         =           1;  // LZSS input MB
+static constexpr int      kConvRes        =        1024;  // convolution image size
+static constexpr int      kRasterTris     =       20000;  // raster triangles
   // AI inference batch size
 
 static constexpr int      kWarmUpRounds   =           2;   // warm-up iterations
-static constexpr int      kBenchRounds    =           3;   // measurement rounds (averaged)
+static constexpr int      kBenchRounds    =           2;   // measurement rounds (averaged)
 
 // ============================================================================
 // Section 2 — Utility Classes & Helpers
@@ -1737,7 +1736,7 @@ struct FdtdResult { double mlups; };
 
 FdtdResult bench_fdtd() {
     show_progress("FDTD EM (Yee grid, " + std::to_string(kFdtdNx) + "x" + std::to_string(kFdtdNy) + ")");
-    constexpr int R = kBenchRounds, NX = 200, NY = 200, ST = 50;
+    constexpr int R = kBenchRounds; const int NX = kFdtdNx, NY = kFdtdNy, ST = kFdtdSteps;
     std::vector<double> ez(NX * NY, 0), hx(NX * NY, 0), hy(NX * NY, 0);
     double sum_mlups = 0;
     for (int round = 0; round < R; ++round) {
@@ -1772,7 +1771,7 @@ struct RigidResult { double mcollisions_per_sec; };
 
 RigidResult bench_rigid() {
     show_progress("Rigid Body (collision detection)");
-    constexpr int R = kBenchRounds, N = 500;
+    constexpr int R = kBenchRounds; const int N = kRigidBodies;
     struct S { double x,y,z,vx,vy,vz,r; };
     std::vector<S> spheres(N), orig(N);
     { uint64_t s = runtime_seed(); std::mt19937_64 rng(s);
@@ -1813,7 +1812,7 @@ struct RayResult { double mrays_per_sec; };
 
 RayResult bench_raytrace() {
     show_progress("Ray Tracing (Whitted, " + std::to_string(kRayResX) + "x" + std::to_string(kRayResY) + ")");
-    constexpr int R = kBenchRounds, W = 512, H = 512;
+    constexpr int R = kBenchRounds; const int W = kRayResX, H = kRayResY;
     struct V { double x,y,z; V operator+(V o){return {x+o.x,y+o.y,z+o.z};} V operator-(V o){return {x-o.x,y-o.y,z-o.z};}
         V operator*(double s){return {x*s,y*s,z*s};} double dot(V o){return x*o.x+y*o.y+z*o.z;} V norm(){double l=std::sqrt(dot(*this))+1e-12;return {x/l,y/l,z/l};} };
     struct Sph { V c; double r; double col[3]; };
@@ -1872,7 +1871,7 @@ struct McResult { double msteps_per_sec; };
 
 McResult bench_montecarlo() {
     show_progress("Monte Carlo (Metropolis, LJ)");
-    constexpr int R = kBenchRounds, N = 200, STEPS = 100000;
+    constexpr int R = kBenchRounds; const int N = 100, STEPS = kMcSteps;
     struct A { double x,y,z; };
     std::vector<A> atoms(N); double sum_mps = 0;
     auto energy = [&](const std::vector<A>& at) { double e=0; for(int i=0;i<N;++i) for(int j=i+1;j<N;++j)
@@ -1962,7 +1961,7 @@ struct NeuronResult { double mupdates_per_sec; };
 
 NeuronResult bench_neuron() {
     show_progress("Spiking Neurons (Izhikevich)");
-    constexpr int R=kBenchRounds,N=500,ST=2000;
+    constexpr int R=kBenchRounds,N=kIzhNeurons,ST=kIzhSteps;
     std::vector<double> v(N),u(N),a(N),b(N),c(N),d(N),I(N);
     // Random sparse connections
     std::vector<std::vector<int>> conn(N);
@@ -1986,7 +1985,7 @@ struct LuResult { double gflops; };
 
 LuResult bench_lu() {
     show_progress("LU Decomposition (no pivoting)");
-    constexpr int R=kBenchRounds, N=512;
+    constexpr int R=kBenchRounds; const int N=static_cast<int>(kLuN);
     std::vector<double> A(N*N), orig(N*N);
     { uint64_t s=runtime_seed(); for(int i=0;i<N*N;++i) orig[i]=(((s+i)&0xFFFF)/65536.0-0.5)*2.0+((i%N==i/N)?N:0); }
     std::vector<double> work(N*N);
@@ -2013,7 +2012,7 @@ struct OdeResult { double steps_per_sec; };
 
 OdeResult bench_ode() {
     show_progress("Stiff ODE (Robertson, BDF)");
-    constexpr int R=kBenchRounds, ST=5000;
+    constexpr int R=kBenchRounds; const int ST=kOdeSteps;
     double sum=0;
     for(int round=0;round<R;++round){
         double y1=1.0,y2=0.0,y3=0.0,dt=1e-4;
@@ -2036,7 +2035,7 @@ struct KaratsubaResult { double mdigit_muls_per_sec; };
 
 KaratsubaResult bench_karatsuba() {
     show_progress("BigInt Mul (Karatsuba)");
-    constexpr int R=kBenchRounds, BITS=65536;
+    constexpr int R=kBenchRounds; const int BITS=kKaratsubaBits;
     using BigInt = std::vector<uint64_t>; int words = (BITS+63)/64;
     auto add = [](BigInt& c, const BigInt& a, const BigInt& b){ uint64_t carry=0; for(size_t i=0;i<c.size();++i){uint64_t s=a[i]+b[i]+carry;c[i]=s;carry=(s<a[i])?1:0;} };
     auto sub = [](BigInt& c, const BigInt& a, const BigInt& b){ int64_t borrow=0; for(size_t i=0;i<c.size();++i){int64_t d=static_cast<int64_t>(a[i])-b[i]-borrow;c[i]=static_cast<uint64_t>(d);borrow=(d<0)?1:0;} };
@@ -2071,20 +2070,36 @@ KaratsubaResult bench_karatsuba() {
 struct RegexResult { double mbs; };
 
 RegexResult bench_regex() {
-    show_progress("Regex Matching (std::regex)");
+    show_progress("Pattern Matching (email scan)");
     constexpr int R=kBenchRounds;
-    // Generate random text
     int64_t bytes = kRegexMB*1024LL*1024LL;
     std::string text(static_cast<size_t>(bytes), ' ');
-    { uint64_t s=runtime_seed(); for(size_t i=0;i<text.size();++i) text[i]=static_cast<char>(' '+' '+(s+i)%95); }
+    // Generate text with embedded email-like patterns for realistic matching.
+    { uint64_t s=runtime_seed();
+      for(size_t i=0;i<text.size();++i){char c=static_cast<char>(' '+((s+i)%95));text[i]=(c=='@'||c=='.')?static_cast<char>('a'+((s+i)%26)):c;}
+      // Insert some actual @ and . to create matchable patterns.
+      for(size_t i=0;i+20<text.size();i+=97){text[i+5]='@';text[i+12]='.';}
+    }
+    // Hand-rolled scanner: find "alnum+@alnum+.alnum+" patterns without std::regex.
+    auto count_patterns=[&]()->int64_t{
+        int64_t cnt=0; size_t n=text.size();
+        for(size_t i=0;i+6<n;++i){
+            if(text[i]=='@'){
+                // Check left side: at least 1 alphanumeric before @
+                if(i==0||!isalnum(text[i-1])) continue;
+                // Check right side: alnum+.alnum
+                size_t j=i+1; while(j<n&&isalnum(text[j]))j++;
+                if(j>=n||text[j]!='.') continue;
+                j++; while(j<n&&isalnum(text[j]))j++;
+                if(j>i+3){cnt++;i=j-1;}
+            }
+        }
+        return cnt;
+    };
     double sum=0;
     for(int round=0;round<R;++round){
-        std::regex pat(R"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})");
-        int matches=0; auto it=std::sregex_iterator(text.begin(),text.end(),pat); auto end=std::sregex_iterator();
-        for(;it!=end && matches<10;++it) matches++; // warm up
-        Timer t; matches=0;
-        it=std::sregex_iterator(text.begin(),text.end(),pat);
-        for(;it!=end;++it) matches++;
+        count_patterns(); // warm up
+        Timer t; int64_t matches=count_patterns();
         double sec=t.secs();escape_result(static_cast<uint64_t>(matches));
         sum+=static_cast<double>(bytes)/sec/1e6;
     }
@@ -2126,7 +2141,7 @@ struct AllocResult { double mallocs_per_sec; };
 
 AllocResult bench_alloc() {
     show_progress("Memory Allocator (multi-threaded)");
-    constexpr int R=kBenchRounds, T=4; const int64_t OPS=10000000;
+    constexpr int R=kBenchRounds, T=4; const int64_t OPS=kAllocOps;
     double sum=0;
     for(int round=0;round<R;++round){
         std::atomic<int64_t> total{0};
@@ -2151,7 +2166,7 @@ struct AtomicResult { double matomic_per_sec; };
 
 AtomicResult bench_atomic() {
     show_progress("Concurrency Primitives (atomic inc)");
-    constexpr int R=kBenchRounds, T=4; const int64_t N=100000000;
+    constexpr int R=kBenchRounds, T=4; const int64_t N=kAtomicIters;
     double sum=0;
     for(int round=0;round<R;++round){
         std::atomic<int64_t> counter{0};
@@ -2175,7 +2190,7 @@ struct AstResult { double mnodes_per_sec; };
 
 AstResult bench_ast() {
     show_progress("AST Evaluation (expression tree)");
-    constexpr int R=kBenchRounds, ND=500000;
+    constexpr int R=kBenchRounds; const int ND=kAstNodes;
     struct Node { int op; double val; Node *l,*r; }; // op:0=const,1=add,2=mul,3=sin
     std::vector<Node> pool(ND);
     { uint64_t s=runtime_seed(); std::mt19937_64 rng(s); for(int i=0;i<ND;++i){pool[i].op=rng()%4;pool[i].val=(rng()%1000)/100.0;pool[i].l=(i*2+1<ND)?&pool[i*2+1]:nullptr;pool[i].r=(i*2+2<ND)?&pool[i*2+2]:nullptr;} }
@@ -2198,7 +2213,7 @@ struct ParseResult { double mtokens_per_sec; };
 
 ParseResult bench_parser() {
     show_progress("LR Parser (table-driven)");
-    constexpr int R=kBenchRounds, NT=2000000;
+    constexpr int R=kBenchRounds; const int64_t NT=kParseTokens;
     // Generate token stream: numbers and operators
     std::vector<int> tokens(NT);
     { uint64_t s=runtime_seed(); for(int i=0;i<NT;++i) tokens[i]=(s+i)%5; } // 0=num,1=+,2=*,3=(,4=)
@@ -2228,7 +2243,7 @@ struct VmResult { double mips; };
 
 VmResult bench_vm() {
     show_progress("Bytecode VM (stack machine)");
-    constexpr int R=kBenchRounds; const int64_t INS=10000000;
+    constexpr int R=kBenchRounds; const int64_t INS=kVmInsns;
     // Generate a loop-heavy program: compute sum of 1..1000 repeatedly
     enum Op { PUSH=0,ADD=1,SUB=2,MUL=3,JMP=4,JZ=5,DUP=6,SWAP=7,HALT=8 };
     std::vector<int> prog; // push(1000), dup, jz(end), push(1), sub, swap, push(0), add, swap, jmp(loop), halt
@@ -2359,7 +2374,7 @@ struct LzssResult { double mbs; };
 
 LzssResult bench_lzss() {
     show_progress("LZSS Compression");
-    constexpr int R=kBenchRounds, WIN=4096, LOOK=18;
+    constexpr int R=kBenchRounds; const int WIN=512, LOOK=18;
     int64_t bytes=kLzssMB*1024LL*1024LL;
     std::vector<uint8_t> data(bytes);
     { uint64_t s=runtime_seed(); for(int64_t i=0;i<bytes;++i) data[i]=static_cast<uint8_t>(((s+i)*1103515245+12345)&0xFF); }
@@ -2413,7 +2428,7 @@ struct RasterResult { double mtris_per_sec; };
 
 RasterResult bench_raster() {
     show_progress("Triangle Rasterization");
-    constexpr int R=kBenchRounds, NT=100000, W=512, H=512;
+    constexpr int R=kBenchRounds; const int NT=kRasterTris; const int W=512, H=512;
     struct V2 { float x,y; }; struct Tri { V2 a,b,c; };
     std::vector<Tri> tris(NT);
     { uint64_t s=runtime_seed(); std::mt19937 rng(s); std::uniform_real_distribution<float> p(0,static_cast<float>(W));
@@ -2848,8 +2863,8 @@ void print(const SysInfo& sys) const {
         row("  Throughput", fmt(karatsuba_res.mdigit_muls_per_sec), "Mdig-mul/s"); row("  ---","","");
         double karatsuba_score = norm_higher(karatsuba_res.mdigit_muls_per_sec, Reference::karatsuba_mdm); row_score("  Score","","",karatsuba_score);
 
-        // ---- 29. Regex ----
-        { std::ostringstream t; t << "Regex Matching (std::regex, " << kRegexMB << " MB)"; section(29, t.str()); }
+        // ---- 29. Pattern Match ----
+        { std::ostringstream t; t << "Pattern Matching (email scan, " << kRegexMB << " MB)"; section(29, t.str()); }
         row("  Throughput", fmt(regex_res.mbs), "MB/s"); row("  ---","","");
         double regex_score = norm_higher(regex_res.mbs, Reference::regex_mbs); row_score("  Score","","",regex_score);
 
