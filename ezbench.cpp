@@ -1,5 +1,5 @@
 /*
- * ezbench — Cross-Platform CPU Benchmark
+ * ezbench v2 — Cross-Platform CPU Benchmark (40 tests, 8 categories, 15 ISAs)
  * Copyright (c) 2026 Hemingtsai
  * Released under the MIT License.
  *
@@ -2619,7 +2619,7 @@ void print(const SysInfo& sys) const {
         std::cout << "\n";
         hr('=');
         std::cout << "  " << std::left << std::setw(kW - 2)
-                  << "ezbench -- CPU Benchmark Results" << "\n";
+                  << "ezbench v2 — 40 Benchmarks · Baseline: Apple M-series" << "\n";
         hr('=');
         row("Architecture",   sys.arch,                    "");
         row("Compiler",       sys.compiler,                "");
@@ -2951,7 +2951,7 @@ void print(const SysInfo& sys) const {
         std::cout << "  " << std::left << std::setw(kLabelW) << "*  OVERALL SCORE"
                   << std::right << std::setw(kValW) << fmt(overall_score, 1) << "\n";
         hr('=');
-        std::cout << "  (Geometric mean of 41 sub-scores.  100 = baseline CPU 2020.)\n";
+        std::cout << "  (Geometric mean of 41 sub-scores.  100 = Apple M-series baseline.)\n";
 
         // Machine-readable CSV.
         std::cout << "\n[CSV] int,fp,mem_r,mem_w,mem_lat,branch,cache,ilp,mt,matmul,sort,hash,fft,nbody,fluid,chem,game,ai,fdtd,rigid,ray,hf,mc,hp,sw,neuron,lu,ode,karatsuba,regex,json,alloc,atomic,ast,parse,vm,aes,sha,lzss,conv,raster,overall\n";
@@ -3050,7 +3050,7 @@ static double compute_overall(const FinalReport& r) {
 int main() {
     std::cout << "\n";
     std::cout << "  ============================================================\n";
-    std::cout << "    ezbench -- Cross-Platform CPU Benchmark\n";
+    std::cout << "    ezbench v2 — 40 benchmarks, 8 categories, 15 ISAs\n";
     std::cout << "    Copyright (c) 2026 Hemingtsai  |  MIT License\n";
     std::cout << "  ============================================================\n\n";
 

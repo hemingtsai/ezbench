@@ -1,107 +1,140 @@
 # ezbench — Cross-Platform CPU Benchmark
 
-A comprehensive, single-file CPU benchmark written in **ISO C++17**.  
-No platform-specific headers, no intrinsics, no external dependencies — just the standard library.
+**40 benchmarks. 8 categories. One C++17 file. Zero dependencies.**
 
-Copyright &copy; 2026 **Hemingtsai** — Released under the [MIT License](LICENSE).
+Runs on x86-64, AArch64, RISC-V, LoongArch, PowerPC, s390x, MIPS, ARM32 — any platform with a C++17 compiler.
+
+Copyright &copy; 2026 **Hemingtsai** — [MIT License](LICENSE).
 
 ---
 
 ## Quick Start
 
 ```sh
-# Build (any C++17 compiler)
 g++ -std=c++17 -O2 -pthread -o ezbench ezbench.cpp
-
-# Run
 ./ezbench
 ```
 
-Each benchmark runs **3 independent rounds** (configurable via `kBenchRounds`)
-and reports the arithmetic mean for stable, reproducible results.
-Total runtime: **60–180 seconds** depending on your CPU.
+3 rounds averaged. ~30–120 seconds depending on CPU.
 
 ---
 
-## Supported Architectures
+## Supported Architectures (15 ISAs)
 
-| Architecture | Detection Macro |
-|---|---|
-| **x86-64** | `__x86_64__` / `_M_X64` |
-| **x86-32** | `__i386__` / `_M_IX86` |
-| **AArch64** (ARM 64-bit) | `__aarch64__` / `_M_ARM64` |
-| **ARM 32-bit (armhf)** | `__arm__` + `__ARM_PCS_VFP` |
-| **ARM 32-bit (soft-float)** | `__arm__` (no VFP) |
-| **RISC-V 64-bit** | `__riscv` + `__riscv_xlen == 64` |
-| **RISC-V 32-bit** | `__riscv` + `__riscv_xlen == 32` |
-| **LoongArch 64-bit** | `__loongarch64` |
-| **LoongArch 32-bit** | `__loongarch__` |
-| **PowerPC 64-bit** | `__powerpc64__` / `__ppc64__` |
-| **PowerPC 32-bit** | `__powerpc__` / `__ppc__` |
-| **IBM z/Architecture (s390x)** | `__s390x__` |
-| **IBM S/390 (31-bit)** | `__s390__` |
-| **MIPS 64-bit** | `__mips64` |
-| **MIPS 32-bit** | `__mips__` |
+x86-64, x86-32, AArch64, ARM32 (armhf / soft-float), RISC-V 64/32, LoongArch 64/32, PowerPC 64/32, IBM z/Architecture (s390x), IBM S/390, MIPS 64/32.
 
-All detection is purely compile-time via pre-defined compiler macros — zero runtime probing.
+All detection is compile-time via predefined macros — zero runtime probing.
 
 ---
 
-## What It Tests
+## Benchmark Categories (40 total)
 
-| # | Benchmark | What It Measures |
-|---|-----------|------------------|
-| 1 | **Integer Arithmetic** | Throughput of add, multiply, divide, and bitwise/shift operations (MOPS) |
-| 2 | **Floating-Point** | Scalar single- and double-precision add, mul, div, sqrt (MFLOPS) |
-| 3 | **Memory Bandwidth** | Sequential read, write, and copy bandwidth on a large buffer (GB/s) |
-| 4 | **Memory Latency** | Random-access pointer-chasing latency, plus a size sweep to reveal cache boundaries (ns) |
-| 5 | **Branch Prediction** | Predictable vs. unpredictable branch throughput ratio |
-| 6 | **Cache Hierarchy** | Read bandwidth at working-set sizes from 2 KB to 256 MB |
-| 7 | **Instruction-Level Parallelism** | Dependent chain vs. independent operation throughput ratio |
-| 8 | **Multi-Threaded Scaling** | Speedup and efficiency from 1 up to all hardware threads |
-| 9 | **Matrix Multiplication** | Dense float matrix multiplication (GFLOPS) |
-| 10 | **Sorting Throughput** | `std::sort` on random 64-bit integers (Melem/s) |
-| 11 | **Hash / Mix Throughput** | FNV-1a style hash over a 128 MB buffer (MB/s) |
+### Compute
+| # | Benchmark | Metric |
+|---|-----------|--------|
+| 1 | Integer Arithmetic (add/mul/div/bit) | MOPS |
+| 2 | Floating-Point (SP/DP, add/mul/div/sqrt) | MFLOPS |
+| 7 | Instruction-Level Parallelism | × factor |
+| 9 | Matrix Multiplication (512² float) | GFLOPS |
+| 12 | FFT (radix-2, 65536 pts) | GFLOPS |
+| 26 | LU Decomposition | GFLOPS |
+| 27 | Stiff ODE (Robertson) | steps/s |
+| 28 | Karatsuba BigInt Multiplication | Mdigit-mul/s |
+
+### Memory
+| # | Benchmark | Metric |
+|---|-----------|--------|
+| 3 | Memory Bandwidth (read/write/copy) | GB/s |
+| 4 | Memory Latency (pointer chase + cache sweep) | ns |
+| 6 | Cache Hierarchy (2 KB → 256 MB) | GB/s |
+
+### Physics Simulation
+| # | Benchmark | Metric |
+|---|-----------|--------|
+| 13 | N-body Gravitational | GFLOPS |
+| 18 | FDTD Electromagnetic (Yee grid) | MLUPS |
+| 19 | Rigid Body Collision Detection | Mcoll/s |
+| 20 | Whitted Ray Tracing | Mrays/s |
+
+### Chemistry & Biology
+| # | Benchmark | Metric |
+|---|-----------|--------|
+| 15 | Molecular Dynamics (Lennard-Jones) | GFLOPS |
+| 21 | Quantum Chemistry (Hartree-Fock ERI) | GFLOPS |
+| 22 | Monte Carlo (Metropolis) | Msteps/s |
+| 23 | Protein Folding (HP model) | Mevals/s |
+| 24 | DNA Alignment (Smith-Waterman) | Mcells/s |
+| 25 | Spiking Neurons (Izhikevich) | Mn-upd/s |
+
+### Fluids & Graphics
+| # | Benchmark | Metric |
+|---|-----------|--------|
+| 14 | Fluid LBM (D2Q9) | MLUPS |
+| 39 | Image Convolution (Sobel 3×3) | Mpixels/s |
+| 40 | Triangle Rasterization | Mtris/s |
+
+### Programming & Compilers
+| # | Benchmark | Metric |
+|---|-----------|--------|
+| 16 | Game Logic (entity update) | Melem/s |
+| 29 | Pattern Matching (email scan) | MB/s |
+| 30 | JSON Parsing (recursive descent) | MB/s |
+| 33 | AST Evaluation | Mnodes/s |
+| 34 | LR Table-driven Parser | Mtokens/s |
+| 35 | Bytecode Stack VM | MIPS |
+
+### Concurrency
+| # | Benchmark | Metric |
+|---|-----------|--------|
+| 8 | Multi-Threaded Scaling (1 → N threads) | × speedup |
+| 31 | Memory Allocator (multi-threaded) | Mallocs/s |
+| 32 | Concurrency Primitives (atomic inc) | Matomic/s |
+
+### Crypto & Compression
+| # | Benchmark | Metric |
+|---|-----------|--------|
+| 36 | AES-256 CBC (hand-rolled) | MB/s |
+| 37 | SHA-256 | MB/s |
+| 38 | LZSS Compression | MB/s |
+
+### Misc
+| # | Benchmark | Metric |
+|---|-----------|--------|
+| 5 | Branch Prediction | × ratio |
+| 10 | Sorting (`std::sort`) | Melem/s |
+| 11 | Hash / Mix (FNV-1a) | MB/s |
+| 17 | AI Inference (MLP 784×512×256×10) | GFLOPS |
 
 ---
 
-## Interpreting Results
+## Scoring
 
-Each sub-benchmark produces a **sub-score** normalised against a reference baseline
-(a typical 6-core desktop CPU from ~2020). A score of **100** means “on par with the
-reference”.
+Each benchmark produces a **sub-score**: `raw / reference × 100`.
 
-The **Overall Score** is the **geometric mean** of all sub-scores — a single number
-that represents balanced, all-around CPU performance.
+The **Overall Score** is the **geometric mean** of all 41 sub-scores.
 
-| Score Range | Interpretation |
-|-------------|----------------|
-| &lt; 60     | Entry-level / low-power |
-| 60 – 90     | Mid-range |
-| 90 – 120    | Upper mid-range (≈ reference) |
-| 120 – 180   | High-end desktop / workstation |
-| &gt; 180    | Top-tier / server-class |
+**Baseline**: calibrated to the author's Apple M-series machine (score ≈ 100).
+Faster CPUs score above 100; slower CPUs score below.
 
-A machine-readable CSV summary line is printed at the end for scripting:
+---
+
+## Output
+
+A clean column-aligned report with per-benchmark details, plus a machine-readable CSV line:
 
 ```
-[CSV] int,fp,mem_r,mem_w,mem_lat,branch,ilp,multithread,matmul,sort,hash,overall
-[CSV] 69.1,63.1,470.5,620.1,86.6,56.3,104.8,113.6,128.7,543.5,295.3,153.1
+[CSV] int,fp,mem_r,mem_w,mem_lat,branch,...,overall
+[CSV] 76.8,60.8,461.5,...,105.4
 ```
 
 ---
 
-## Design Principles
+## Design
 
-- **Zero platform-specific code** — uses only ISO C++17 and the standard library.
-  Compiles and runs on Linux, macOS, Windows, and any other platform with a
-  conforming C++17 toolchain.
-- **Fair measurement** — runtime-dependent seeds prevent compile-time folding;
-  `volatile` escape barriers prevent dead-code elimination; warm-up rounds
-  stabilise cache and frequency state before timing; **3 independent rounds
-  averaged** to suppress OS scheduling noise and thermal transients.
-- **Single file** — everything in `ezbench.cpp` (~1500 lines) with a navigable index at the top.
-- **All comments in English.**
+- **ISO C++17 only** — no intrinsics, no inline assembly, no platform headers
+- **Fair** — runtime seeds prevent compile-time folding; `volatile` barriers prevent dead-code elimination; warm-up rounds stabilize caches; **3 rounds averaged**
+- **Single file** — ~3100 lines with navigable index at top
+- **All English comments**
 
 ---
 
@@ -109,16 +142,10 @@ A machine-readable CSV summary line is printed at the end for scripting:
 
 ```
 ezbench/
-├── LICENSE          MIT License
-├── README.md        This file
-└── ezbench.cpp      The benchmark (single file, ~1360 lines)
+├── LICENSE       MIT
+├── README.md     This file
+└── ezbench.cpp   The benchmark (~3100 lines)
 ```
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE) for full text.
 
 ---
 
