@@ -106,20 +106,20 @@ static constexpr int      kRigidBodies    =         300;  // rigid bodies
 static constexpr int      kRayResX        =         256;  // ray trace resolution X
 static constexpr int      kRayResY        =         256;  // ray trace resolution Y
 static constexpr int      kHfBasis        =          10;  // HF basis functions
-static constexpr int      kMcSteps        =        5000;  // Monte Carlo steps
-static constexpr int      kHpSeqLen       =          30;  // HP sequence length
-static constexpr int      kHpAnnealSteps  =       10000;  // HP annealing steps
+static constexpr int      kMcSteps        =        1000;  // Monte Carlo steps
+static constexpr int      kHpSeqLen       =          20;  // HP sequence length
+static constexpr int      kHpAnnealSteps  =         500;  // HP annealing steps
 static constexpr int      kSwSeqLen       =         500;  // Smith-Waterman seq length
 static constexpr int      kIzhNeurons     =         200;  // Izhikevich neurons
 static constexpr int      kIzhSteps       =         500;  // Izhikevich time steps
 static constexpr int64_t  kLuN            =         400;  // LU matrix size
-static constexpr int      kOdeSteps       =        2000;  // ODE solver steps
+static constexpr int      kOdeSteps       =       50000;  // ODE solver steps
 static constexpr int      kKaratsubaBits  =       16384;  // BigInt bits
 static constexpr int64_t  kRegexMB        =           8;  // regex input MB
 static constexpr int64_t  kJsonMB         =           8;  // JSON input MB (approx)
 static constexpr int64_t  kAllocOps       =     2000000;  // alloc/free ops
 static constexpr int64_t  kAtomicIters    =   20'000'000;  // atomic inc iterations
-static constexpr int      kAstNodes       =      100000;  // AST nodes
+static constexpr int      kAstNodes       =      500000;  // AST nodes
 static constexpr int64_t  kParseTokens    =     500000;  // parser tokens
 static constexpr int64_t  kVmInsns       =   2'000'000;  // VM instructions
 static constexpr int64_t  kAesMB          =          16;  // AES input MB
@@ -130,7 +130,7 @@ static constexpr int      kRasterTris     =       20000;  // raster triangles
   // AI inference batch size
 
 static constexpr int      kWarmUpRounds   =           2;   // warm-up iterations
-static constexpr int      kBenchRounds    =           2;   // measurement rounds (averaged)
+static constexpr int      kBenchRounds    =           1;   // measurement rounds
 
 // ============================================================================
 // Section 2 — Utility Classes & Helpers
@@ -2431,18 +2431,25 @@ RasterResult bench_raster() {
     constexpr int R=kBenchRounds; const int NT=kRasterTris; const int W=512, H=512;
     struct V2 { float x,y; }; struct Tri { V2 a,b,c; };
     std::vector<Tri> tris(NT);
-    { uint64_t s=runtime_seed(); std::mt19937 rng(s); std::uniform_real_distribution<float> p(0,static_cast<float>(W));
+    { uint64_t s=runtime_seed(); std::mt19937 rng(static_cast<unsigned>(s)); std::uniform_real_distribution<float> p(0,static_cast<float>(W-1));
         for(int i=0;i<NT;++i) tris[i]={{p(rng),p(rng)},{p(rng),p(rng)},{p(rng),p(rng)}}; }
     std::vector<uint8_t> fb(W*H,0);
     auto edge=[&](V2 a,V2 b,V2 p){return (b.x-a.x)*(p.y-a.y)-(b.y-a.y)*(p.x-a.x);};
+    auto bbox=[&](const Tri& t,int&x0,int&x1,int&y0,int&y1){
+        x0=std::max(0,static_cast<int>(std::min({t.a.x,t.b.x,t.c.x})));
+        x1=std::min(W-1,static_cast<int>(std::max({t.a.x,t.b.x,t.c.x})));
+        y0=std::max(0,static_cast<int>(std::min({t.a.y,t.b.y,t.c.y})));
+        y1=std::min(H-1,static_cast<int>(std::max({t.a.y,t.b.y,t.c.y})));
+    };
     double sum=0; int drawn=0;
     for(int round=0;round<R;++round){
-        for(int i=0;i<NT/10;++i){auto&t=tris[i];int mx=std::max({t.a.x,t.b.x,t.c.x}),Mx=std::min({t.a.x,t.b.x,t.c.x}),my=std::max({t.a.y,t.b.y,t.c.y}),My=std::min({t.a.y,t.b.y,t.c.y});mx=std::min(mx,W-1);Mx=std::max(Mx,0);my=std::min(my,H-1);My=std::max(My,0);
-            for(int y=My;y<=my;++y) for(int x=Mx;x<=mx;++x){V2 p={static_cast<float>(x)+0.5f,static_cast<float>(y)+0.5f};if(edge(t.a,t.b,p)>=0&&edge(t.b,t.c,p)>=0&&edge(t.c,t.a,p)>=0)fb[y*W+x]=1;}}
+        // Warm up
+        for(int i=0;i<NT/10;++i){int x0,x1,y0,y1;bbox(tris[i],x0,x1,y0,y1);
+            for(int y=y0;y<=y1;++y) for(int x=x0;x<=x1;++x){V2 p={static_cast<float>(x)+0.5f,static_cast<float>(y)+0.5f};if(edge(tris[i].a,tris[i].b,p)>=0&&edge(tris[i].b,tris[i].c,p)>=0&&edge(tris[i].c,tris[i].a,p)>=0)fb[y*W+x]=1;}}
         drawn=0; std::fill(fb.begin(),fb.end(),0);
         Timer t;
-        for(int i=0;i<NT;++i){auto&t=tris[i];int mx=std::max({t.a.x,t.b.x,t.c.x}),Mx=std::min({t.a.x,t.b.x,t.c.x}),my=std::max({t.a.y,t.b.y,t.c.y}),My=std::min({t.a.y,t.b.y,t.c.y});mx=std::min(mx,W-1);Mx=std::max(Mx,0);my=std::min(my,H-1);My=std::max(My,0);
-            for(int y=My;y<=my;++y) for(int x=Mx;x<=mx;++x){V2 p={static_cast<float>(x)+0.5f,static_cast<float>(y)+0.5f};if(edge(t.a,t.b,p)>=0&&edge(t.b,t.c,p)>=0&&edge(t.c,t.a,p)>=0){fb[y*W+x]=1;drawn++;}}}
+        for(int i=0;i<NT;++i){int x0,x1,y0,y1;bbox(tris[i],x0,x1,y0,y1);
+            for(int y=y0;y<=y1;++y) for(int x=x0;x<=x1;++x){V2 p={static_cast<float>(x)+0.5f,static_cast<float>(y)+0.5f};if(edge(tris[i].a,tris[i].b,p)>=0&&edge(tris[i].b,tris[i].c,p)>=0&&edge(tris[i].c,tris[i].a,p)>=0){fb[y*W+x]=1;drawn++;}}}
         double sec=t.secs();escape_result(static_cast<uint64_t>(drawn));
         sum+=static_cast<double>(NT)/sec/1e6;
     }
@@ -2933,7 +2940,7 @@ void print(const SysInfo& sys) const {
         std::cout << "  (Geometric mean of 41 sub-scores.  100 = baseline CPU 2020.)\n";
 
         // Machine-readable CSV.
-        std::cout << "\n[CSV] int,fp,mem_r,mem_w,mem_lat,branch,cache,ilp,mt,matmul,sort,hash,fft,nbody,fluid,chem,game,ai,overall\n";
+        std::cout << "\n[CSV] int,fp,mem_r,mem_w,mem_lat,branch,cache,ilp,mt,matmul,sort,hash,fft,nbody,fluid,chem,game,ai,fdtd,rigid,ray,hf,mc,hp,sw,neuron,lu,ode,karatsuba,regex,json,alloc,atomic,ast,parse,vm,aes,sha,lzss,conv,raster,overall\n";
         std::cout << "[CSV] " << fmt(int_score, 1)   << "," << fmt(fp_score, 1)       << ","
                                     << fmt(bw_read_score, 1) << "," << fmt(bw_write_score, 1) << ","
                                     << fmt(lat_score, 1)     << "," << fmt(br_score, 1)       << ","
@@ -2943,7 +2950,18 @@ void print(const SysInfo& sys) const {
                                     << fmt(fft_score, 1)     << "," << fmt(nbody_score, 1)    << ","
                                     << fmt(fluid_score, 1)   << "," << fmt(chem_score, 1)     << ","
                                     << fmt(game_score, 1)    << "," << fmt(ai_score, 1)       << ","
-                                    << fmt(overall_score, 1) << "\n";
+                                    << fmt(fdtd_score, 1)    << "," << fmt(rigid_score, 1)    << ","
+                                    << fmt(ray_score, 1)     << "," << fmt(hf_score, 1)       << ","
+                                    << fmt(mc_score, 1)      << "," << fmt(hp_score, 1)       << ","
+                                    << fmt(sw_score, 1)      << "," << fmt(neuron_score, 1)   << ","
+                                    << fmt(lu_score, 1)      << "," << fmt(ode_score, 1)      << ","
+                                    << fmt(karatsuba_score, 1) << "," << fmt(regex_score, 1) << ","
+                                    << fmt(json_score, 1)    << "," << fmt(alloc_score, 1)    << ","
+                                    << fmt(atomic_score, 1)  << "," << fmt(ast_score, 1)      << ","
+                                    << fmt(parse_score, 1)   << "," << fmt(vm_score, 1)       << ","
+                                    << fmt(aes_score, 1)     << "," << fmt(sha_score, 1)      << ","
+                                    << fmt(lzss_score, 1)    << "," << fmt(conv_score, 1)     << ","
+                                    << fmt(raster_score, 1)  << "," << fmt(overall_score, 1) << "\n";
     }
 };
 
@@ -2971,13 +2989,11 @@ static double compute_overall(const FinalReport& r) {
     scores.push_back(norm_higher(r.mm_res.gflops, Reference::matmul_gflops));
     scores.push_back(norm_higher(r.sort_res.melem_per_sec, Reference::sort_melem));
     scores.push_back(norm_higher(r.hash_res.mbs, Reference::hash_mbs));
-    scores.push_back(norm_higher(r.hash_res.mbs, Reference::hash_mbs));
     scores.push_back(norm_higher(r.fft_res.gflops, Reference::fft_gflops));
     scores.push_back(norm_higher(r.nbody_res.gflops, Reference::nbody_gflops));
     scores.push_back(norm_higher(r.fluid_res.mlups, Reference::fluid_mlups));
     scores.push_back(norm_higher(r.chem_res.gflops, Reference::chem_gflops));
     scores.push_back(norm_higher(r.game_res.melem_per_sec, Reference::game_melem));
-    scores.push_back(norm_higher(r.ai_res.gflops, Reference::ai_gflops));
     scores.push_back(norm_higher(r.ai_res.gflops, Reference::ai_gflops));
     scores.push_back(norm_higher(r.fdtd_res.mlups, Reference::fdtd_mlups));
     scores.push_back(norm_higher(r.rigid_res.mcollisions_per_sec, Reference::rigid_mcolps));
