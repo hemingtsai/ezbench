@@ -20,8 +20,14 @@
  *  Section 12 — Dense Matrix Multiplication Benchmark  .......  line  1238
  *  Section 13 — Sorting Throughput Benchmark  ................  line  1340
  *  Section 14 — Hash / Integer-Mix Throughput  ...............  line  1410
- *  Section 15 — Score Aggregation & Final Report  ............  line  1470
- *  Section 16 — Entry Point (main)  ..........................  line  1580
+ *  Section 15 — Fast Fourier Transform (FFT)  ................  line  1480
+ *  Section 16 — N-body Gravitational Simulation  .............  line  1550
+ *  Section 17 — Fluid Dynamics (Lattice Boltzmann)  ..........  line  1690
+ *  Section 18 — Molecular Dynamics (Lennard-Jones)  ..........  line  1860
+ *  Section 19 — Game Logic Simulation  .......................  line  1960
+ *  Section 20 — AI Inference (Neural Network)  ...............  line  2030
+ *  Section 21 — Score Aggregation & Final Report  ............  line  2120
+ *  Section 22 — Entry Point (main)  ..........................  line  2240
  * ============================================================================
  *
  * Every benchmark runs kBenchRounds (default 3) independent rounds and
@@ -52,6 +58,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <complex>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -78,6 +85,16 @@ static constexpr int64_t  kCacheIters     =   2'000'000;  // per-size cache prob
 static constexpr int64_t  kMatMulN        =         512;  // matrix dimension
 static constexpr int64_t  kSortSize       =   2'000'000;  // sort array length
 static constexpr int64_t  kHashMB         =         128;  // MB for hash test
+static constexpr int64_t  kFftN           =       65536;  // FFT points (power of 2)
+static constexpr int      kNbodyBodies    =        2000;  // N-body count
+static constexpr int      kLbmNy          =         128;  // LBM grid height
+static constexpr int      kLbmNx          =         256;  // LBM grid width
+static constexpr int      kLbmSteps       =          20;  // LBM steps per round
+static constexpr int      kMdAtoms        =         800;  // MD atom count
+static constexpr int      kMdSteps        =          10;  // MD steps per round
+static constexpr int      kGameEntities   =      100000;  // game entity count
+static constexpr int      kAiBatch        =         500;  // AI inference batch size
+
 static constexpr int      kWarmUpRounds   =           2;   // warm-up iterations
 static constexpr int      kBenchRounds    =           3;   // measurement rounds (averaged)
 
@@ -1158,6 +1175,526 @@ HashResult bench_hash() {
 }
 
 // ============================================================================
+// Section 14a — Fast Fourier Transform Benchmark
+// ============================================================================
+// In-place radix-2 Cooley–Tukey FFT on complex doubles with precomputed
+// twiddle factors.  Stresses complex arithmetic and memory access patterns.
+
+struct FftResult {
+    double gflops;   // billion floating-point ops per second
+};
+
+FftResult bench_fft() {
+    show_progress("FFT (radix-2, double complex)");
+    constexpr int R = kBenchRounds;
+    FftResult res{};
+    const int N = static_cast<int>(kFftN);
+    std::vector<std::complex<double>> data(N);
+    std::vector<std::complex<double>> twiddle(N / 2);
+
+    // Precompute twiddle factors.
+    for (int i = 0; i < N / 2; ++i) {
+        double a = -2.0 * M_PI * static_cast<double>(i) / static_cast<double>(N);
+        twiddle[i] = {std::cos(a), std::sin(a)};
+    }
+
+    double sum_gflops = 0;
+    for (int round = 0; round < R; ++round) {
+        uint64_t s = runtime_seed() + static_cast<uint64_t>(round) * 0x9E3779B97F4A7C15ULL;
+        for (int i = 0; i < N; ++i) {
+            double v = static_cast<double>((s + static_cast<uint64_t>(i)) & 0xFFF) / 4096.0;
+            data[i] = {v, 0.0};
+        }
+
+        // Warm-up: one pass.
+        {
+            auto tmp = data;
+            for (int i = 1, j = 0; i < N; ++i) {
+                int bit = N >> 1;
+                for (; j & bit; bit >>= 1) j ^= bit;
+                j ^= bit;
+                if (i < j) std::swap(tmp[i], tmp[j]);
+            }
+        }
+
+        auto tmp = data;
+        Timer t;
+        // Bit-reversal permutation.
+        for (int i = 1, j = 0; i < N; ++i) {
+            int bit = N >> 1;
+            for (; j & bit; bit >>= 1) j ^= bit;
+            j ^= bit;
+            if (i < j) std::swap(tmp[i], tmp[j]);
+        }
+        // Butterfly stages.
+        int step = 1;
+        for (int len = 2; len <= N; len <<= 1) {
+            int half = len >> 1;
+            for (int i = 0; i < N; i += len) {
+                for (int j = 0; j < half; ++j) {
+                    auto w = twiddle[j * step];
+                    auto u = tmp[i + j];
+                    auto v = tmp[i + j + half] * w;
+                    tmp[i + j] = u + v;
+                    tmp[i + j + half] = u - v;
+                }
+            }
+            step >>= 1;
+        }
+        double sec = t.secs();
+        escape_result(static_cast<uint64_t>(std::abs(tmp[0]) * 1e9));
+        double ops = 5.0 * static_cast<double>(N) * std::log2(static_cast<double>(N));
+        sum_gflops += ops / sec / 1e9;
+    }
+    res.gflops = sum_gflops / R;
+    show_done(res.gflops, "GFLOPS");
+    return res;
+}
+
+// ============================================================================
+// Section 14b — N-body Gravitational Simulation Benchmark
+// ============================================================================
+// All-pairs O(N^2) gravitational force calculation.  Stresses sqrt, division,
+// and 3D vector arithmetic.
+
+struct NbodyResult {
+    double gflops;
+};
+
+NbodyResult bench_nbody() {
+    show_progress("N-body (gravity, O(n^2))");
+    constexpr int R = kBenchRounds;
+    NbodyResult res{};
+    const int N = kNbodyBodies;
+    const double dt = 0.001;
+    const double eps = 1e-10;
+
+    struct Body { double x, y, z, vx, vy, vz, mass; };
+    std::vector<Body> bodies(N);
+    std::vector<Body> orig(N);
+
+    // Initialize bodies on a random spherical shell.
+    {
+        uint64_t s = runtime_seed();
+        std::mt19937_64 rng(s);
+        std::uniform_real_distribution<double> angle(0.0, 2.0 * M_PI);
+        std::uniform_real_distribution<double> rad(0.5, 1.5);
+        for (int i = 0; i < N; ++i) {
+            double theta = angle(rng), phi = angle(rng), r = rad(rng);
+            orig[i] = {r * std::cos(theta) * std::sin(phi),
+                       r * std::sin(theta) * std::sin(phi),
+                       r * std::cos(phi), 0.0, 0.0, 0.0, 1.0 / static_cast<double>(N)};
+        }
+    }
+
+    double sum_gflops = 0;
+    for (int round = 0; round < R; ++round) {
+        bodies = orig;
+
+        // Warm up.
+        for (int i = 0; i < N; ++i) {
+            double fx = 0, fy = 0, fz = 0;
+            for (int j = 0; j < N; ++j) {
+                if (i == j) continue;
+                double dx = bodies[j].x - bodies[i].x;
+                double dy = bodies[j].y - bodies[i].y;
+                double dz = bodies[j].z - bodies[i].z;
+                double d2 = dx*dx + dy*dy + dz*dz + eps;
+                double inv_d3 = 1.0 / (d2 * std::sqrt(d2));
+                fx += bodies[j].mass * dx * inv_d3;
+                fy += bodies[j].mass * dy * inv_d3;
+                fz += bodies[j].mass * dz * inv_d3;
+            }
+        }
+
+        Timer t;
+        for (int i = 0; i < N; ++i) {
+            double fx = 0, fy = 0, fz = 0;
+            for (int j = 0; j < N; ++j) {
+                if (i == j) continue;
+                double dx = bodies[j].x - bodies[i].x;
+                double dy = bodies[j].y - bodies[i].y;
+                double dz = bodies[j].z - bodies[i].z;
+                double d2 = dx*dx + dy*dy + dz*dz + eps;
+                double inv_d3 = 1.0 / (d2 * std::sqrt(d2));
+                fx += bodies[j].mass * dx * inv_d3;
+                fy += bodies[j].mass * dy * inv_d3;
+                fz += bodies[j].mass * dz * inv_d3;
+            }
+            bodies[i].vx += fx * dt;
+            bodies[i].vy += fy * dt;
+            bodies[i].vz += fz * dt;
+        }
+        for (int i = 0; i < N; ++i) {
+            bodies[i].x += bodies[i].vx * dt;
+            bodies[i].y += bodies[i].vy * dt;
+            bodies[i].z += bodies[i].vz * dt;
+        }
+        double sec = t.secs();
+        escape_result(static_cast<uint64_t>(bodies[0].x * 1e9));
+        // ~22 FP ops per interaction, N*(N-1) interactions.
+        double ops = 22.0 * static_cast<double>(N) * static_cast<double>(N - 1);
+        sum_gflops += ops / sec / 1e9;
+    }
+    res.gflops = sum_gflops / R;
+    show_done(res.gflops, "GFLOPS");
+    return res;
+}
+
+// ============================================================================
+// Section 14c — Fluid Dynamics (Lattice Boltzmann D2Q9) Benchmark
+// ============================================================================
+// 2D Lattice Boltzmann Method with BGK collision.  Stresses stencil memory
+// access and floating-point throughput.
+
+struct FluidResult {
+    double mlups;   // million lattice updates per second
+};
+
+FluidResult bench_fluid() {
+    show_progress("Fluid LBM (D2Q9, BGK)");
+    constexpr int R = kBenchRounds;
+    FluidResult res{};
+    const int nx = kLbmNx, ny = kLbmNy, nc = nx * ny;
+    const double omega = 1.0 / 0.6;  // relaxation parameter
+    // D2Q9 weights and directions
+    const double w[9] = {4.0/9.0, 1.0/9.0, 1.0/9.0, 1.0/9.0, 1.0/9.0,
+                         1.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0};
+    const int ex[9] = { 0, 1, 0,-1, 0, 1,-1,-1, 1};
+    const int ey[9] = { 0, 0, 1, 0,-1, 1, 1,-1,-1};
+
+    std::vector<double> f(nc * 9), f_new(nc * 9);
+
+    double sum_mlups = 0;
+    for (int round = 0; round < R; ++round) {
+        uint64_t s = runtime_seed() + static_cast<uint64_t>(round) * 0x9E3779B97F4A7C15ULL;
+        // Initialize with equilibrium + small perturbation.
+        for (int idx = 0; idx < nc; ++idx) {
+            double rho = 1.0 + 0.01 * static_cast<double>((s + static_cast<uint64_t>(idx)) & 0xFF) / 255.0;
+            double ux = 0.01 * static_cast<double>(((s >> 8) + static_cast<uint64_t>(idx)) & 0xFF) / 255.0;
+            double uy = 0.0;
+            for (int q = 0; q < 9; ++q) {
+                double cu = ex[q] * ux + ey[q] * uy;
+                f[idx * 9 + q] = w[q] * rho * (1.0 + 3.0 * cu + 4.5 * cu * cu - 1.5 * (ux*ux + uy*uy));
+            }
+        }
+
+        // Warm up (1 step).
+        for (int y = 0; y < ny; ++y) {
+            for (int x = 0; x < nx; ++x) {
+                int idx = y * nx + x;
+                // Collision
+                double rho = 0, ux = 0, uy = 0;
+                for (int q = 0; q < 9; ++q) rho += f[idx * 9 + q];
+                for (int q = 0; q < 9; ++q) { ux += ex[q] * f[idx * 9 + q]; uy += ey[q] * f[idx * 9 + q]; }
+                ux /= rho; uy /= rho;
+                double u2 = ux*ux + uy*uy;
+                for (int q = 0; q < 9; ++q) {
+                    double cu = ex[q]*ux + ey[q]*uy;
+                    double feq = w[q] * rho * (1.0 + 3.0*cu + 4.5*cu*cu - 1.5*u2);
+                    f_new[idx * 9 + q] = f[idx * 9 + q] - omega * (f[idx * 9 + q] - feq);
+                }
+            }
+        }
+        // Streaming
+        for (int y = 0; y < ny; ++y) {
+            for (int x = 0; x < nx; ++x) {
+                for (int q = 0; q < 9; ++q) {
+                    int nx_x = (x + ex[q] + nx) % nx;
+                    int nx_y = (y + ey[q] + ny) % ny;
+                    f[(nx_y * nx + nx_x) * 9 + q] = f_new[(y * nx + x) * 9 + q];
+                }
+            }
+        }
+
+        // Measure kLbmSteps steps.
+        Timer t;
+        for (int step = 0; step < kLbmSteps; ++step) {
+            // Collision
+            for (int y = 0; y < ny; ++y) {
+                for (int x = 0; x < nx; ++x) {
+                    int idx = y * nx + x;
+                    double rho = 0, ux = 0, uy = 0;
+                    for (int q = 0; q < 9; ++q) rho += f[idx * 9 + q];
+                    double inv_rho = 1.0 / (rho + 1e-10);
+                    for (int q = 0; q < 9; ++q) { ux += ex[q] * f[idx * 9 + q]; uy += ey[q] * f[idx * 9 + q]; }
+                    ux *= inv_rho; uy *= inv_rho;
+                    double u2 = ux*ux + uy*uy;
+                    for (int q = 0; q < 9; ++q) {
+                        double cu = ex[q]*ux + ey[q]*uy;
+                        double feq = w[q] * rho * (1.0 + 3.0*cu + 4.5*cu*cu - 1.5*u2);
+                        f_new[idx * 9 + q] = f[idx * 9 + q] - omega * (f[idx * 9 + q] - feq);
+                    }
+                }
+            }
+            // Streaming
+            for (int y = 0; y < ny; ++y) {
+                for (int x = 0; x < nx; ++x) {
+                    for (int q = 0; q < 9; ++q) {
+                        int nx_x = (x + ex[q] + nx) % nx;
+                        int nx_y = (y + ey[q] + ny) % ny;
+                        f[(nx_y * nx + nx_x) * 9 + q] = f_new[(y * nx + x) * 9 + q];
+                    }
+                }
+            }
+        }
+        double sec = t.secs();
+        escape_result(static_cast<uint64_t>(f[0] * 1e9));
+        double updates = static_cast<double>(nc) * static_cast<double>(kLbmSteps);
+        sum_mlups += updates / sec / 1e6;
+    }
+    res.mlups = sum_mlups / R;
+    show_done(res.mlups, "MLUPS");
+    return res;
+}
+
+// ============================================================================
+// Section 14d — Molecular Dynamics (Lennard-Jones) Benchmark
+// ============================================================================
+// Pairwise Lennard-Jones 12-6 potential with velocity-Verlet integration.
+// Stresses sqrt, division, and pairwise distance calculations.
+
+struct ChemResult {
+    double gflops;
+};
+
+ChemResult bench_chemistry() {
+    show_progress("Molecular Dynamics (LJ 12-6)");
+    constexpr int R = kBenchRounds;
+    ChemResult res{};
+    const int N = kMdAtoms;
+    const double dt = 0.001;
+    const double eps = 1e-10;
+
+    struct Atom { double x, y, z, vx, vy, vz; };
+    std::vector<Atom> atoms(N);
+    std::vector<Atom> orig(N);
+
+    {
+        uint64_t s = runtime_seed();
+        std::mt19937_64 rng(s);
+        std::uniform_real_distribution<double> pos(-5.0, 5.0);
+        for (int i = 0; i < N; ++i)
+            orig[i] = {pos(rng), pos(rng), pos(rng), 0.0, 0.0, 0.0};
+    }
+
+    double sum_gflops = 0;
+    for (int round = 0; round < R; ++round) {
+        atoms = orig;
+
+        // Warm up (1 step).
+        {
+            std::vector<double> fx(N, 0.0), fy(N, 0.0), fz(N, 0.0);
+            for (int i = 0; i < N; ++i) {
+                for (int j = i + 1; j < N; ++j) {
+                    double dx = atoms[j].x - atoms[i].x;
+                    double dy = atoms[j].y - atoms[i].y;
+                    double dz = atoms[j].z - atoms[i].z;
+                    double r2 = dx*dx + dy*dy + dz*dz + eps;
+                    double r6 = r2 * r2 * r2;
+                    double r12 = r6 * r6;
+                    double f = 24.0 * (2.0 / r12 - 1.0 / r6) / r2;
+                    fx[i] += f * dx; fy[i] += f * dy; fz[i] += f * dz;
+                    fx[j] -= f * dx; fy[j] -= f * dy; fz[j] -= f * dz;
+                }
+            }
+        }
+
+        Timer t;
+        for (int step = 0; step < kMdSteps; ++step) {
+            std::vector<double> fx(N, 0.0), fy(N, 0.0), fz(N, 0.0);
+            for (int i = 0; i < N; ++i) {
+                for (int j = i + 1; j < N; ++j) {
+                    double dx = atoms[j].x - atoms[i].x;
+                    double dy = atoms[j].y - atoms[i].y;
+                    double dz = atoms[j].z - atoms[i].z;
+                    double r2 = dx*dx + dy*dy + dz*dz + eps;
+                    double r6 = r2 * r2 * r2;
+                    double r12 = r6 * r6;
+                    double f = 24.0 * (2.0 / r12 - 1.0 / r6) / r2;
+                    fx[i] += f * dx; fy[i] += f * dy; fz[i] += f * dz;
+                    fx[j] -= f * dx; fy[j] -= f * dy; fz[j] -= f * dz;
+                }
+            }
+            for (int i = 0; i < N; ++i) {
+                atoms[i].vx += fx[i] * dt;
+                atoms[i].vy += fy[i] * dt;
+                atoms[i].vz += fz[i] * dt;
+                atoms[i].x  += atoms[i].vx * dt;
+                atoms[i].y  += atoms[i].vy * dt;
+                atoms[i].z  += atoms[i].vz * dt;
+            }
+        }
+        double sec = t.secs();
+        escape_result(static_cast<uint64_t>(atoms[0].x * 1e9));
+        double ops = static_cast<double>(kMdSteps) * static_cast<double>(N) *
+                     static_cast<double>(N - 1) * 0.5 * 28.0;
+        sum_gflops += ops / sec / 1e9;
+    }
+    res.gflops = sum_gflops / R;
+    show_done(res.gflops, "GFLOPS");
+    return res;
+}
+
+// ============================================================================
+// Section 14e — Game Logic Simulation Benchmark
+// ============================================================================
+// Entity update loop with physics, AI state machine, and health regen.
+// Stresses branch prediction and mixed integer / FP operations.
+
+struct GameResult {
+    double melem_per_sec;   // million entity updates per second
+};
+
+GameResult bench_game() {
+    show_progress("Game Logic (entity update)");
+    constexpr int R = kBenchRounds;
+    GameResult res{};
+    const int M = kGameEntities;
+
+    struct Entity { float x, y, vx, vy, health; int state, team; };
+    std::vector<Entity> ents(M);
+    std::vector<Entity> orig(M);
+
+    {
+        uint64_t s = runtime_seed();
+        std::mt19937 rng(static_cast<unsigned>(s));
+        std::uniform_real_distribution<float> pos(-100.0f, 100.0f);
+        std::uniform_real_distribution<float> vel(-1.0f, 1.0f);
+        std::uniform_real_distribution<float> hp(1.0f, 100.0f);
+        std::uniform_int_distribution<int> team(0, 3);
+        for (int i = 0; i < M; ++i)
+            orig[i] = {pos(rng), pos(rng), vel(rng), vel(rng), hp(rng), 0, team(rng)};
+    }
+
+    double sum_mps = 0;
+    const float dt = 1.0f / 60.0f;
+
+    for (int round = 0; round < R; ++round) {
+        ents = orig;
+
+        // Warm up.
+        for (int i = 0; i < M; ++i) {
+            auto& e = ents[i];
+            e.x += e.vx * dt; e.y += e.vy * dt;
+            if (e.health < 25.0f)       { e.state = 2; e.vx *= -1.2f; e.vy *= -1.2f; }
+            else if (e.health < 50.0f)  { e.state = 1; e.vx *= 0.8f;  e.vy *= 0.8f; }
+            else                        { e.state = 0; e.vx *= 1.05f; e.vy *= 1.05f; }
+            if (e.state == 1 && e.health < 100.0f) e.health += 0.5f;
+            if (e.x > 100.0f) e.x -= 200.0f;
+            if (e.x < -100.0f) e.x += 200.0f;
+        }
+
+        Timer t;
+        for (int i = 0; i < M; ++i) {
+            auto& e = ents[i];
+            e.x += e.vx * dt; e.y += e.vy * dt;
+            if (e.health < 25.0f)       { e.state = 2; e.vx *= -1.2f; e.vy *= -1.2f; }
+            else if (e.health < 50.0f)  { e.state = 1; e.vx *= 0.8f;  e.vy *= 0.8f; }
+            else                        { e.state = 0; e.vx *= 1.05f; e.vy *= 1.05f; }
+            if (e.state == 1 && e.health < 100.0f) e.health += 0.5f;
+            if (e.x > 100.0f) e.x -= 200.0f;
+            if (e.x < -100.0f) e.x += 200.0f;
+        }
+        double sec = t.secs();
+        escape_result(static_cast<uint64_t>(ents[0].x * 1e6f));
+        sum_mps += static_cast<double>(M) / sec / 1e6;
+    }
+    res.melem_per_sec = sum_mps / R;
+    show_done(res.melem_per_sec, "Melem/s");
+    return res;
+}
+
+// ============================================================================
+// Section 14f — AI Inference (Neural Network) Benchmark
+// ============================================================================
+// Feedforward MLP inference: 784->256->128->10 with ReLU activation.
+// Stresses matrix-vector multiplication and activation functions.
+
+struct AiResult {
+    double gflops;
+};
+
+AiResult bench_ai() {
+    show_progress("AI Inference (MLP 784x512x256x10)");
+    constexpr int R = kBenchRounds;
+    AiResult res{};
+    const int I = 784, H1 = 512, H2 = 256, O = 10;
+    const int batch = kAiBatch;
+
+    // Allocate weights and biases with deterministic "random" values.
+    std::vector<double> W1(I * H1), b1(H1);
+    std::vector<double> W2(H1 * H2), b2(H2);
+    std::vector<double> W3(H2 * O), b3(O);
+    std::vector<double> input(I);
+
+    {
+        uint64_t s = runtime_seed();
+        auto lcg = [&]() { s = s * 1103515245 + 12345; return static_cast<double>(s & 0xFFFF) / 65536.0 - 0.5; };
+        for (auto& v : W1) v = lcg();
+        for (auto& v : b1) v = lcg();
+        for (auto& v : W2) v = lcg();
+        for (auto& v : b2) v = lcg();
+        for (auto& v : W3) v = lcg();
+        for (auto& v : b3) v = lcg();
+    }
+
+    // One forward pass (cache-friendly loop order).
+    auto forward = [&](std::vector<double>& h1, std::vector<double>& h2, std::vector<double>& out) {
+        // Layer 1: I -> H1, ReLU
+        for (int i = 0; i < H1; ++i) h1[i] = b1[i];
+        for (int j = 0; j < I; ++j) {
+            double in = input[j];
+            for (int i = 0; i < H1; ++i) h1[i] += in * W1[j * H1 + i];
+        }
+        for (int i = 0; i < H1; ++i)
+            if (h1[i] < 0.0) h1[i] = 0.0;  // ReLU
+
+        // Layer 2: H1 -> H2, ReLU
+        for (int i = 0; i < H2; ++i) h2[i] = b2[i];
+        for (int j = 0; j < H1; ++j) {
+            double h = h1[j];
+            for (int i = 0; i < H2; ++i) h2[i] += h * W2[j * H2 + i];
+        }
+        for (int i = 0; i < H2; ++i)
+            if (h2[i] < 0.0) h2[i] = 0.0;
+
+        // Layer 3: H2 -> O, linear
+        for (int i = 0; i < O; ++i) out[i] = b3[i];
+        for (int j = 0; j < H2; ++j) {
+            double h = h2[j];
+            for (int i = 0; i < O; ++i) out[i] += h * W3[j * O + i];
+        }
+    };
+
+    double sum_gflops = 0;
+    std::vector<double> h1(H1), h2(H2), out(O);
+
+    for (int round = 0; round < R; ++round) {
+        uint64_t s = runtime_seed() + static_cast<uint64_t>(round) * 0x9E3779B97F4A7C15ULL;
+        for (int j = 0; j < I; ++j)
+            input[j] = static_cast<double>((s + static_cast<uint64_t>(j)) & 0xFF) / 255.0;
+
+        // Warm up.
+        forward(h1, h2, out);
+
+        Timer t;
+        for (int b = 0; b < batch; ++b)
+            forward(h1, h2, out);
+        double sec = t.secs();
+        escape_result(static_cast<uint64_t>(out[0] * 1e9));
+
+        // FLOPs per forward pass: 2*(I*H1 + H1*H2 + H2*O)
+        double ops_per_pass = 2.0 * (static_cast<double>(I)*H1 + static_cast<double>(H1)*H2 + static_cast<double>(H2)*O);
+        sum_gflops += ops_per_pass * static_cast<double>(batch) / sec / 1e9;
+    }
+    res.gflops = sum_gflops / R;
+    show_done(res.gflops, "GFLOPS");
+    return res;
+}
+
+
+// ============================================================================
 // Section 15 — Score Aggregation & Final Report
 // ============================================================================
 
@@ -1178,6 +1715,12 @@ struct Reference {
     static constexpr double sort_melem       =    12.0;   // Melem/s
     static constexpr double hash_mbs         =  3000.0;   // MB/s
     static constexpr double mt_speedup_4t    =     3.3;   // speedup at 4 threads
+    static constexpr double fft_gflops       =    10.0;   // GFLOPS
+    static constexpr double nbody_gflops     =     4.0;   // GFLOPS
+    static constexpr double fluid_mlups      =    30.0;   // MLUPS
+    static constexpr double chem_gflops      =     3.0;   // GFLOPS
+    static constexpr double game_melem       =    30.0;   // Melem/s
+    static constexpr double ai_gflops        =    25.0;   // GFLOPS
 };
 
 // Normalise a "higher-is-better" metric.
@@ -1204,6 +1747,12 @@ struct FinalReport {
     MatMulResult   mm_res;
     SortResult     sort_res;
     HashResult     hash_res;
+    FftResult      fft_res;
+    NbodyResult    nbody_res;
+    FluidResult    fluid_res;
+    ChemResult     chem_res;
+    GameResult     game_res;
+    AiResult       ai_res;
     double         overall_score;
 
 void print(const SysInfo& sys) const {
@@ -1397,22 +1946,84 @@ void print(const SysInfo& sys) const {
         double hash_score = norm_higher(hash_res.mbs, Reference::hash_mbs);
         row_score("  Score", "", "", hash_score);
 
+        // ---- 12. FFT ----
+        section(12, "Fast Fourier Transform (radix-2, " + std::to_string(static_cast<int>(kFftN)) + " pts)");
+        row("  Throughput", fmt(fft_res.gflops), "GFLOPS");
+        row("  ---",        "",                  "");
+        double fft_score = norm_higher(fft_res.gflops, Reference::fft_gflops);
+        row_score("  Score", "", "", fft_score);
+
+        // ---- 13. N-body ----
+        {
+            std::ostringstream t;
+            t << "N-body Gravity (" << kNbodyBodies << " bodies, O(n^2))";
+            section(13, t.str());
+        }
+        row("  Throughput", fmt(nbody_res.gflops), "GFLOPS");
+        row("  ---",        "",                    "");
+        double nbody_score = norm_higher(nbody_res.gflops, Reference::nbody_gflops);
+        row_score("  Score", "", "", nbody_score);
+
+        // ---- 14. Fluid LBM ----
+        {
+            std::ostringstream t;
+            t << "Fluid LBM (D2Q9, " << kLbmNx << "x" << kLbmNy << " grid)";
+            section(14, t.str());
+        }
+        row("  Throughput", fmt(fluid_res.mlups), "MLUPS");
+        row("  ---",        "",                    "");
+        double fluid_score = norm_higher(fluid_res.mlups, Reference::fluid_mlups);
+        row_score("  Score", "", "", fluid_score);
+
+        // ---- 15. Molecular Dynamics ----
+        {
+            std::ostringstream t;
+            t << "Molecular Dynamics (LJ, " << kMdAtoms << " atoms)";
+            section(15, t.str());
+        }
+        row("  Throughput", fmt(chem_res.gflops), "GFLOPS");
+        row("  ---",        "",                   "");
+        double chem_score = norm_higher(chem_res.gflops, Reference::chem_gflops);
+        row_score("  Score", "", "", chem_score);
+
+        // ---- 16. Game Logic ----
+        {
+            std::ostringstream t;
+            t << "Game Logic (" << comma(kGameEntities) << " entities)";
+            section(16, t.str());
+        }
+        row("  Throughput", fmt(game_res.melem_per_sec), "Melem/s");
+        row("  ---",        "",                           "");
+        double game_score = norm_higher(game_res.melem_per_sec, Reference::game_melem);
+        row_score("  Score", "", "", game_score);
+
+        // ---- 17. AI Inference ----
+        section(17, "AI Inference (MLP 784x512x256x10, batch " + std::to_string(kAiBatch) + ")");
+        row("  Throughput", fmt(ai_res.gflops), "GFLOPS");
+        row("  ---",        "",                 "");
+        double ai_score = norm_higher(ai_res.gflops, Reference::ai_gflops);
+        row_score("  Score", "", "", ai_score);
+
+
         // ---- Overall ----
         std::cout << "\n";
         hr('=');
         std::cout << "  " << std::left << std::setw(kLabelW) << "*  OVERALL SCORE"
                   << std::right << std::setw(kValW) << fmt(overall_score, 1) << "\n";
         hr('=');
-        std::cout << "  (Geometric mean of 12 sub-scores.  100 = baseline CPU 2020.)\n";
+        std::cout << "  (Geometric mean of 18 sub-scores.  100 = baseline CPU 2020.)\n";
 
         // Machine-readable CSV.
-        std::cout << "\n[CSV] int,fp,mem_r,mem_w,mem_lat,branch,cache,ilp,mt,matmul,sort,hash,overall\n";
+        std::cout << "\n[CSV] int,fp,mem_r,mem_w,mem_lat,branch,cache,ilp,mt,matmul,sort,hash,fft,nbody,fluid,chem,game,ai,overall\n";
         std::cout << "[CSV] " << fmt(int_score, 1)   << "," << fmt(fp_score, 1)       << ","
                                     << fmt(bw_read_score, 1) << "," << fmt(bw_write_score, 1) << ","
                                     << fmt(lat_score, 1)     << "," << fmt(br_score, 1)       << ","
                                     << fmt(cache_score, 1)   << "," << fmt(ilp_score, 1)      << ","
                                     << fmt(mt_score, 1)      << "," << fmt(mm_score, 1)       << ","
                                     << fmt(sort_score, 1)    << "," << fmt(hash_score, 1)     << ","
+                                    << fmt(fft_score, 1)     << "," << fmt(nbody_score, 1)    << ","
+                                    << fmt(fluid_score, 1)   << "," << fmt(chem_score, 1)     << ","
+                                    << fmt(game_score, 1)    << "," << fmt(ai_score, 1)       << ","
                                     << fmt(overall_score, 1) << "\n";
     }
 };
@@ -1441,6 +2052,13 @@ static double compute_overall(const FinalReport& r) {
     scores.push_back(norm_higher(r.mm_res.gflops, Reference::matmul_gflops));
     scores.push_back(norm_higher(r.sort_res.melem_per_sec, Reference::sort_melem));
     scores.push_back(norm_higher(r.hash_res.mbs, Reference::hash_mbs));
+    scores.push_back(norm_higher(r.hash_res.mbs, Reference::hash_mbs));
+    scores.push_back(norm_higher(r.fft_res.gflops, Reference::fft_gflops));
+    scores.push_back(norm_higher(r.nbody_res.gflops, Reference::nbody_gflops));
+    scores.push_back(norm_higher(r.fluid_res.mlups, Reference::fluid_mlups));
+    scores.push_back(norm_higher(r.chem_res.gflops, Reference::chem_gflops));
+    scores.push_back(norm_higher(r.game_res.melem_per_sec, Reference::game_melem));
+    scores.push_back(norm_higher(r.ai_res.gflops, Reference::ai_gflops));
 
     // Geometric mean.
     double log_sum = 0.0;
@@ -1481,6 +2099,12 @@ int main() {
     report.mm_res    = bench_matmul();
     report.sort_res  = bench_sort();
     report.hash_res  = bench_hash();
+    report.fft_res   = bench_fft();
+    report.nbody_res = bench_nbody();
+    report.fluid_res = bench_fluid();
+    report.chem_res  = bench_chemistry();
+    report.game_res  = bench_game();
+    report.ai_res    = bench_ai();
 
     report.overall_score = compute_overall(report);
 
