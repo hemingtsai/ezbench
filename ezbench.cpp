@@ -2244,30 +2244,32 @@ struct VmResult { double mips; };
 VmResult bench_vm() {
     show_progress("Bytecode VM (stack machine)");
     constexpr int R=kBenchRounds; const int64_t INS=kVmInsns;
-    // Generate a loop-heavy program: compute sum of 1..1000 repeatedly
     enum Op { PUSH=0,ADD=1,SUB=2,MUL=3,JMP=4,JZ=5,DUP=6,SWAP=7,HALT=8 };
-    std::vector<int> prog; // push(1000), dup, jz(end), push(1), sub, swap, push(0), add, swap, jmp(loop), halt
-    prog = {PUSH,1000, DUP,JZ,17, PUSH,1, SUB,SWAP, PUSH,0, ADD,SWAP, JMP,2, HALT};
+    // Program: count from 1000 down to 0, increment accumulator each iteration.
+    // Indices: 0:PUSH,1:1000, 2:PUSH,3:0, 4:SWAP,5:DUP,6:JZ,7:18, 8:PUSH,9:1,10:SUB,
+    //         11:SWAP,12:PUSH,13:1,14:ADD,15:SWAP,16:JMP,17:4, 18:HALT
+    std::vector<int> prog = {PUSH,1000, PUSH,0, SWAP,DUP,JZ,18, PUSH,1,SUB,SWAP,PUSH,1,ADD,SWAP,JMP,4, HALT};
     double sum=0;
     for(int round=0;round<R;++round){
         std::vector<int64_t> stack(256); int sp=0, ip=0; int64_t ic=0;
         auto run=[&](int64_t limit){ic=0;ip=0;sp=0;
-            while(ic<limit&&ip>=0&&ip<static_cast<int>(prog.size())){
+            while(ic<limit&&ip>=0&&ip<static_cast<int>(prog.size())&&sp>=0&&sp<256){
                 int op=prog[ip++];
                 switch(op){
-                    case PUSH: stack[sp++]=prog[ip++]; break;
-                    case ADD: sp--; stack[sp-1]+=stack[sp]; break;
-                    case MUL: sp--; stack[sp-1]*=stack[sp]; break;
+                    case PUSH: if(sp<256) stack[sp++]=prog[ip++]; break;
+                    case ADD: if(sp>=2){sp--;stack[sp-1]+=stack[sp];} break;
+                    case SUB: if(sp>=2){sp--;stack[sp-1]-=stack[sp];} break;
+                    case MUL: if(sp>=2){sp--;stack[sp-1]*=stack[sp];} break;
                     case JMP: ip=prog[ip]; break;
-                    case JZ: if(stack[--sp]==0) ip=prog[ip]; else ip++; break;
-                    case DUP: stack[sp]=stack[sp-1]; sp++; break;
-                    case SWAP: {auto t=stack[sp-1];stack[sp-1]=stack[sp-2];stack[sp-2]=t;} break;
+                    case JZ: if(sp>=1&&stack[--sp]==0) ip=prog[ip]; else ip++; break;
+                    case DUP: if(sp>0&&sp<256){stack[sp]=stack[sp-1];sp++;} break;
+                    case SWAP: if(sp>=2){auto t=stack[sp-1];stack[sp-1]=stack[sp-2];stack[sp-2]=t;} break;
                     case HALT: ip=-1; break;
                 }
                 ic++;
             }
         };
-        run(INS/10); // warm up
+        run(INS/10);
         Timer t; run(INS);
         double sec=t.secs();escape_result(static_cast<uint64_t>(ic));
         sum+=static_cast<double>(ic)/sec/1e6;
